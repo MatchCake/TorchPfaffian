@@ -5,4 +5,5 @@ pythonbasictools>=0.0.1a10
 setuptools>=65.5.1
 tqdm>=4.66.1
 psutil>=5.9.6
-numpy
+numpy>=1.23.0
+torch
