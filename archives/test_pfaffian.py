@@ -1,8 +1,7 @@
 import numpy as np
 import pytest
 
-from matchcake import utils
-from ..configs import (
+from .configs import (
     N_RANDOM_TESTS_PER_CASE,
     TEST_SEED,
     ATOL_SCALAR_COMPARISON,

@@ -11,10 +11,9 @@ class PfaffianFDBPf(PfaffianStrategy):
     NAME = "PfaffianFDBPf"
 
     @staticmethod
-    def forward(ctx: torch.autograd.function.FunctionCtx, matrix: torch.Tensor):
-        det = torch.det(matrix)
+    def forward(matrix: torch.Tensor):
+        det = torch.linalg.det(matrix)
         pf = torch.sqrt(torch.abs(det) + PfaffianFDBPf.EPSILON)
-        ctx.save_for_backward(matrix, pf)
         return pf
 
     @staticmethod
@@ -22,21 +21,16 @@ class PfaffianFDBPf(PfaffianStrategy):
         r"""
 
         ..math:
-            \frac{\partial \text{pf}(A)}{\partial x_i} = \frac{1}{2} \text{pf}(A) tr(A^{-1} \frac{\partial A}{\partial x_i})
+            \frac{\partial \text{pf}(A)}{\partial A_{ij}} = \frac{\text{pf}(A)}{2} A^{-1}_{ji}
 
         :param ctx: Context
         :param grad_output: Gradient of the output
         :return: Gradient of the input
         """
         matrix, pf = ctx.saved_tensors
-        matrix_clone = matrix.detach().clone()
-        pf_clone = pf.detach().clone()
-        grad_outputs_clone = grad_output.clone()
-
-        am1 = torch.pinverse(matrix_clone)
-        am1_papx = am1 * grad_outputs_clone.view(-1, 1, 1)
-        trace = torch.einsum('...ii->...', am1_papx)
-        dpf_dx = 0.5 * pf_clone * trace
-        return dpf_dx
+        grad_matrix = None
+        if ctx.needs_input_grad[0]:
+            grad_matrix = torch.einsum('...,...ij->...ji', 0.5 * grad_output * pf, torch.linalg.pinv(matrix))
+        return grad_matrix
 
 

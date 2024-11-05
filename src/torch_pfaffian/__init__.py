@@ -12,22 +12,23 @@ __version__ = "0.0.1-beta0"
 import warnings
 from collections.abc import Callable
 
+import torch
+
 warnings.filterwarnings("ignore", category=Warning, module="docutils")
 warnings.filterwarnings("ignore", category=Warning, module="sphinx")
 
-
-from .strategies.strategy import PfaffianStrategy
+from .strategies import *
 from .utils import get_all_subclasses
 
-strategy_map = {
+pfaffian_strategy_map = {
     _cls.NAME.lower().strip(): _cls
     for _cls in get_all_subclasses(PfaffianStrategy)
 }
 
 
-def get_pfaffian_function(name: str) -> Callable:
+def get_pfaffian_function(name: str = PfaffianFDBPf.NAME) -> Callable[[torch.Tensor], torch.Tensor]:
     name = name.lower().strip()
-    if name not in strategy_map:
-        raise ValueError(f"Unknown ansatz name: {name}")
-    return strategy_map[name].apply
+    if name not in pfaffian_strategy_map:
+        raise ValueError(f"Unknown strategy name: {name}. Available strategies: {list(pfaffian_strategy_map.keys())}")
+    return pfaffian_strategy_map[name].apply
 
