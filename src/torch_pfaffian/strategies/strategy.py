@@ -3,7 +3,7 @@ import torch
 
 
 class PfaffianStrategy(torch.autograd.Function):
-    EPSILON = 1e-10
+    EPSILON = 1e-12
     NAME = "PfaffianStrategy"
 
     @staticmethod
