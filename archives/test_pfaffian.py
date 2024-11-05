@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from .configs import (
+from tests.configs import (
     N_RANDOM_TESTS_PER_CASE,
     TEST_SEED,
     ATOL_SCALAR_COMPARISON,
@@ -10,6 +10,7 @@ from .configs import (
     RTOL_MATRIX_COMPARISON,
     set_seed,
 )
+from torch_pfaffian import utils
 
 set_seed(TEST_SEED)
 MIN_MATRIX_SIZE = 2
