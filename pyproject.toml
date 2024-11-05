@@ -15,10 +15,8 @@ requires = [
     "setuptools>=57.0.0",
     "pytest>=7.4.2",
     "pytest-cov>=4.1.0",
-    "scipy>=1.11.2",
     "wheel",
-    "pythonbasictools>=0.0.1a10",
-    "matplotlib>=3.8.0",
+    "torch",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -26,7 +24,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TorchPfaffian"
-dynamic = ["version", ]
+dynamic = ["version", "readme"]
 description = ""
 authors = [
   { name="Jérémie Gince", email="gincejeremie@gmail.com" },
@@ -45,9 +43,6 @@ requires-python = ">=3.8"
 dependencies = [
     "numpy>=1.23.0",
     "setuptools>=57.0.0",
-    "pytest>=7.4.2",
-    "pytest-cov>=4.1.0",
-    "scipy>=1.11.2",
     "torch"
 ]
 
