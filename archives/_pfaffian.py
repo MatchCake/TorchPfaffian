@@ -11,8 +11,17 @@ import numpy as np
 import warnings
 
 import tqdm
+import pennylane as qml
 
-from .torch_pfaffian import Pfaffian
+from torch_pfaffian import Pfaffian
+
+
+class TensorLike:
+    pass
+
+
+def convert_and_cast_like(*args, **kwargs):
+    return qml.math.convert_like(*args, **kwargs)
 
 
 def _pivot(__matrix, k, kp):
