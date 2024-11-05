@@ -15,3 +15,12 @@ ATOL_SHAPE_COMPARISON = 0
 RTOL_SHAPE_COMPARISON = 0
 
 RUN_SLOW_TESTS = True
+
+
+def set_seed(seed: int = TEST_SEED):
+    import numpy as np
+    import torch
+
+    np.random.seed(seed)
+    torch.random.manual_seed(TEST_SEED)
+    return seed

@@ -16,7 +16,7 @@ Welcome to <PackageName>'s documentation!
    :maxdepth: 4
    :caption: Modules:
 
-   pkg
+   torch_pfaffian
 
 
 .. include:: readme.rst

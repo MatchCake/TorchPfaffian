@@ -4,4 +4,4 @@ pkg
 .. toctree::
    :maxdepth: 4
 
-   pkg
+   torch_pfaffian

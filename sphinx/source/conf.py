@@ -9,7 +9,7 @@ import sys
 import shutil
 basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 sys.path.insert(0, basedir)
-import pkg
+import torch_pfaffian
 
 
 _html_folders_formatted = {}
@@ -61,10 +61,10 @@ def move_private_folders(app, e):
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = '<PackgaeName>'
-copyright = pkg.__copyright__.replace("Copyright ", "")
-author = pkg.__author__
-version = pkg.__version__
+project = 'torch_pfaffian'
+copyright = torch_pfaffian.__copyright__.replace("Copyright ", "")
+author = torch_pfaffian.__author__
+version = torch_pfaffian.__version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
