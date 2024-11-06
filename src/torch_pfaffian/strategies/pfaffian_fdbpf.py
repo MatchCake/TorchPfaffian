@@ -12,6 +12,9 @@ class PfaffianFDBPf(PfaffianStrategy):
 
     @staticmethod
     def forward(matrix: torch.Tensor):
+        _2n = matrix.shape[-1]
+        if _2n % 2 != 0:
+            return torch.zeros_like(matrix[..., 0, 0])
         det = torch.linalg.det(matrix)
         pf = torch.sqrt(torch.abs(det) + PfaffianFDBPf.EPSILON)
         return pf
