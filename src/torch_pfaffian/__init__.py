@@ -6,7 +6,7 @@ __author__ = "Jérémie Gince"
 __email__ = "gincejeremie@gmail.com"
 __copyright__ = "Copyright 2024, Jérémie Gince"
 __license__ = "Apache 2.0"
-__url__ = "https://github.com/MatchCake/torch_pfaffian"
+__url__ = "https://github.com/MatchCake/TorchPfaffian"
 __version__ = "0.0.1-beta0"
 
 import warnings
