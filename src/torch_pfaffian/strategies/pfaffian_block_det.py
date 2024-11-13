@@ -3,20 +3,26 @@ import torch
 from .strategy import PfaffianStrategy
 
 
-class PfaffianFDBPf(PfaffianStrategy):
+class PfaffianBlockDet(PfaffianStrategy):
     """
     This class implements the Pfaffian using the determinant of the matrix for the forward pass and the
     derivative of the Pfaffian with respect to the input matrix for the backward pass.
+
+    The input matrix is considered to be a skew-symmetric matrix.
     """
-    NAME = "PfaffianFDBPf"
+    NAME = "PfaffianBlockDet"
 
     @staticmethod
     def forward(matrix: torch.Tensor):
-        _2n = matrix.shape[-1]
-        if _2n % 2 != 0:
-            return torch.zeros_like(matrix[..., 0, 0])
-        det = torch.linalg.det(matrix)
-        pf = torch.sqrt(torch.abs(det) + PfaffianFDBPf.EPSILON)
+        """
+        Compute the Pfaffian of the input matrix using the determinant of the matrix.
+
+        The matrix is a skew-symmetric matrix of shape (..., 2N, 2N).
+        """
+        # take the upper right block of shape (..., N, N) of the input matrix
+        n = matrix.shape[-1] // 2
+        sub_matrix = matrix[..., :n, n:]
+        pf = (-1)**(n*(n-1)//2) * torch.linalg.det(sub_matrix)
         return pf
 
     @staticmethod
