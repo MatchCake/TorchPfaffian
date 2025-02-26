@@ -3,15 +3,14 @@
 [![Star on GitHub](https://img.shields.io/github/stars/MatchCake/TorchPfaffian.svg?style=social)](https://github.com/MatchCake/TorchPfaffian/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/MatchCake/TorchPfaffian?style=social)](https://github.com/MatchCake/TorchPfaffian/network/members)
 [![Python 3.6](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-310/)
-[![downloads](https://img.shields.io/pypi/dm/MatchCake)](https://pypi.org/project/MatchCake)
-[![PyPI version](https://img.shields.io/pypi/v/MatchCake)](https://pypi.org/project/MatchCake)
+[![downloads](https://img.shields.io/pypi/dm/TorchPfaffian)](https://pypi.org/project/TorchPfaffian)
+[![PyPI version](https://img.shields.io/pypi/v/TorchPfaffian)](https://pypi.org/project/TorchPfaffian)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 ![Tests Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/tests.yml/badge.svg)
 ![Dist Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/build_dist.yml/badge.svg)
 ![Doc Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/docs.yml/badge.svg)
 ![Publish Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/publish.yml/badge.svg)
-![Code coverage](https://raw.githubusercontent.com/MatchCake/TorchPfaffian/coverage-badge/coverage.svg)
 
 
 # Description
