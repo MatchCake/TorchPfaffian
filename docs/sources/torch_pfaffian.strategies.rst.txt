@@ -1,0 +1,37 @@
+torch\_pfaffian.strategies package
+==================================
+
+Submodules
+----------
+
+torch\_pfaffian.strategies.pfaffian\_block\_det module
+------------------------------------------------------
+
+.. automodule:: torch_pfaffian.strategies.pfaffian_block_det
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.strategies.pfaffian\_fdbpf module
+-------------------------------------------------
+
+.. automodule:: torch_pfaffian.strategies.pfaffian_fdbpf
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.strategies.strategy module
+------------------------------------------
+
+.. automodule:: torch_pfaffian.strategies.strategy
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: torch_pfaffian.strategies
+   :members:
+   :undoc-members:
+   :show-inheritance:

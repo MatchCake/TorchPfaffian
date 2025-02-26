@@ -1,0 +1,14 @@
+static
+torch_pfaffian.strategies.html
+py-modindex.html
+modules.html
+searchindex.js
+torch_pfaffian.html
+readme.html
+index.html
+genindex.html
+sources
+.nojekyll
+.buildinfo
+search.html
+objects.inv

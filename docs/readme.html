@@ -1,0 +1,252 @@
+
+
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>TorchPfaffian: PyTorch-Based Pfaffian Computation &mdash; torch_pfaffian  documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/custom.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="torch_pfaffian package" href="torch_pfaffian.html" />
+    <link rel="prev" title="Welcome to &lt;PackageName&gt;’s documentation!" href="index.html" /> 
+
+</head>
+
+<body>
+    <header>
+        <div class="container">
+            <a class="site-nav-toggle hidden-lg-up"><i class="icon-menu"></i></a>
+            <a class="site-title" href="index.html">
+                torch_pfaffian
+            </a>
+        </div>
+    </header>
+
+
+<div class="breadcrumbs-outer hidden-xs-down">
+    <div class="container">
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="breadcrumbs">
+    
+      <li><a href="index.html">Docs</a></li>
+        
+      <li>TorchPfaffian: PyTorch-Based Pfaffian Computation</li>
+    
+    
+      <li class="breadcrumbs-aside">
+        
+            
+            <a href="sources/readme.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+</div>
+    </div>
+</div>
+    <div class="main-outer">
+        <div class="container">
+            <div class="row">
+                <div class="col-12 col-lg-3 site-nav">
+                    
+<div role="search">
+    <form class="search" action="search.html" method="get">
+        <div class="icon-input">
+            <input type="text" name="q" placeholder="Search" />
+            <span class="icon-search"></span>
+        </div>
+        <input type="submit" value="Go" class="d-hidden" />
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+                    <div class="site-nav-tree">
+                        
+                            
+                            
+                                <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">TorchPfaffian: PyTorch-Based Pfaffian Computation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="#description">Description</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#features">Features:</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#installation">Installation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="#important-links">Important Links</a></li>
+<li class="toctree-l1"><a class="reference internal" href="#found-a-bug-or-have-a-feature-request">Found a bug or have a feature request?</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#license">License</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#acknowledgements">Acknowledgements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#citation">Citation</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Modules:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="torch_pfaffian.html">torch_pfaffian package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#subpackages">Subpackages</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian.utils">torch_pfaffian.utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+                            
+                        
+                    </div>
+                </div>
+                <div class="col-12 col-lg-9">
+                    <div class="document">
+                        
+                            
+  <section id="torchpfaffian-pytorch-based-pfaffian-computation">
+<h1>TorchPfaffian: PyTorch-Based Pfaffian Computation<a class="headerlink" href="#torchpfaffian-pytorch-based-pfaffian-computation" title="Permalink to this heading">¶</a></h1>
+<a class="reference external image-reference" href="https://github.com/MatchCake/TorchPfaffian/stargazers"><img alt="Star on GitHub" src="https://img.shields.io/github/stars/MatchCake/TorchPfaffian.svg?style=social" /></a>
+<a class="reference external image-reference" href="https://github.com/MatchCake/TorchPfaffian/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/MatchCake/TorchPfaffian?style=social" /></a>
+<a class="reference external image-reference" href="https://www.python.org/downloads/release/python-310/"><img alt="Python 3.6" src="https://img.shields.io/badge/python-3.10-blue.svg" /></a>
+<a class="reference external image-reference" href="https://pypi.org/project/TorchPfaffian"><img alt="downloads" src="https://img.shields.io/pypi/dm/TorchPfaffian" /></a>
+<a class="reference external image-reference" href="https://pypi.org/project/TorchPfaffian"><img alt="PyPI version" src="https://img.shields.io/pypi/v/TorchPfaffian" /></a>
+<a class="reference external image-reference" href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" /></a>
+<a class="reference external image-reference" href="https://github.com/MatchCake/TorchPfaffian/actions/workflows/tests.yml/badge.svg"><img alt="Tests Workflow" src="https://github.com/MatchCake/TorchPfaffian/actions/workflows/tests.yml/badge.svg" /></a>
+<a class="reference external image-reference" href="https://github.com/MatchCake/TorchPfaffian/actions/workflows/build_dist.yml/badge.svg"><img alt="Dist Workflow" src="https://github.com/MatchCake/TorchPfaffian/actions/workflows/build_dist.yml/badge.svg" /></a>
+<a class="reference external image-reference" href="https://github.com/MatchCake/TorchPfaffian/actions/workflows/docs.yml/badge.svg"><img alt="Doc Workflow" src="https://github.com/MatchCake/TorchPfaffian/actions/workflows/docs.yml/badge.svg" /></a>
+<a class="reference external image-reference" href="https://github.com/MatchCake/TorchPfaffian/actions/workflows/publish.yml/badge.svg"><img alt="Publish Workflow" src="https://github.com/MatchCake/TorchPfaffian/actions/workflows/publish.yml/badge.svg" /></a>
+</section>
+<section id="description">
+<h1>Description<a class="headerlink" href="#description" title="Permalink to this heading">¶</a></h1>
+<p>TorchPfaffian is a Python package for efficiently computing the Pfaffian of skew-symmetric matrices using PyTorch.
+Designed as a PyTorch-based alternative to <a class="reference external" href="https://github.com/basnijholt/pfapack">pfapack</a>, it enables GPU
+acceleration and supports automatic differentiation, making it particularly useful in physics, quantum computing,
+and machine learning applications.</p>
+<section id="features">
+<h2>Features:<a class="headerlink" href="#features" title="Permalink to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>Efficient Pfaffian computation for skew-symmetric matrices</p></li>
+<li><p>GPU acceleration via PyTorch</p></li>
+<li><p>Support for automatic differentiation</p></li>
+<li><p>Seamless integration with PyTorch tensors</p></li>
+</ul>
+</section>
+<section id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Permalink to this heading">¶</a></h2>
+<p>With <code class="docutils literal notranslate"><span class="pre">python</span></code> and <code class="docutils literal notranslate"><span class="pre">pip</span></code> installed, run the following commands to install TorchPfaffian:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>torchpfaffian
+</pre></div>
+</div>
+<p>With <code class="docutils literal notranslate"><span class="pre">poetry</span></code> installed, run the following commands to install TorchPfaffian:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>poetry<span class="w"> </span>add<span class="w"> </span>torchpfaffian
+</pre></div>
+</div>
+</section>
+</section>
+<section id="important-links">
+<h1>Important Links<a class="headerlink" href="#important-links" title="Permalink to this heading">¶</a></h1>
+<ul class="simple">
+<li><p>Documentation at <a class="reference external" href="https://MatchCake.github.io/TorchPfaffian/">https://MatchCake.github.io/TorchPfaffian/</a>.</p></li>
+<li><p>Github at <a class="reference external" href="https://github.com/MatchCake/TorchPfaffian/">https://github.com/MatchCake/TorchPfaffian/</a>.</p></li>
+</ul>
+</section>
+<section id="found-a-bug-or-have-a-feature-request">
+<h1>Found a bug or have a feature request?<a class="headerlink" href="#found-a-bug-or-have-a-feature-request" title="Permalink to this heading">¶</a></h1>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/MatchCake/TorchPfaffian/issues/new">Click here to create a new issue.</a></p></li>
+</ul>
+<section id="license">
+<h2>License<a class="headerlink" href="#license" title="Permalink to this heading">¶</a></h2>
+<p><a class="reference external" href="LICENSE">Apache License 2.0</a></p>
+</section>
+<section id="acknowledgements">
+<h2>Acknowledgements<a class="headerlink" href="#acknowledgements" title="Permalink to this heading">¶</a></h2>
+</section>
+<section id="citation">
+<h2>Citation<a class="headerlink" href="#citation" title="Permalink to this heading">¶</a></h2>
+<p>Repository:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nd">@misc</span><span class="p">{</span><span class="n">torchpfaffian_Gince2025</span><span class="p">,</span>
+  <span class="n">title</span><span class="o">=</span><span class="p">{</span><span class="n">Torch</span> <span class="n">Pfaffian</span><span class="p">},</span>
+  <span class="n">author</span><span class="o">=</span><span class="p">{</span><span class="n">Jérémie</span> <span class="n">Gince</span><span class="p">},</span>
+  <span class="n">year</span><span class="o">=</span><span class="p">{</span><span class="mi">2025</span><span class="p">},</span>
+  <span class="n">publisher</span><span class="o">=</span><span class="p">{</span><span class="n">Université</span> <span class="n">de</span> <span class="n">Sherbrooke</span><span class="p">},</span>
+  <span class="n">url</span><span class="o">=</span><span class="p">{</span><span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">github</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">MatchCake</span><span class="o">/</span><span class="n">TorchPfaffian</span><span class="p">},</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>    
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'./',
+            VERSION:'',
+            LANGUAGE:'en',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+    <script type="text/javascript" src="static/documentation_options.js"></script>
+    <script type="text/javascript" src="static/doctools.js"></script>
+    <script type="text/javascript" src="static/sphinx_highlight.js"></script>
+    <script type="text/javascript" src="static/js/theme.js"></script>
+  
+    <div class="footer" role="contentinfo">
+        <div class="container">
+            &#169; Copyright 2024, Jérémie Gince.
+        Created using <a href="http://sphinx-doc.org/">Sphinx</a> 6.2.1.
+        </div>
+    </div>  
+
+</body>
+</html>
