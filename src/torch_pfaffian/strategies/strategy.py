@@ -1,14 +1,13 @@
-from abc import ABC, abstractmethod
 import torch
 
 
 class PfaffianStrategy(torch.autograd.Function):
-    EPSILON = 1e-12
+    EPSILON = 1e-30
     NAME = "PfaffianStrategy"
 
     @staticmethod
     def setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output):
-        matrix, = inputs
+        (matrix,) = inputs
         pf = output
         ctx.save_for_backward(matrix, pf)
 
@@ -17,7 +16,5 @@ class PfaffianStrategy(torch.autograd.Function):
         pass
 
     @staticmethod
-    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output):
+    def backward(ctx: torch.autograd.function.BackwardCFunction, grad_output):
         pass
-
-

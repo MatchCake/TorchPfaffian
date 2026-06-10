@@ -1,7 +1,6 @@
-import itertools
-from typing import Any
-import torch
 import numpy as np
+import torch
+
 from .strategy import PfaffianStrategy
 
 
@@ -10,6 +9,7 @@ class PfaffianPerm(PfaffianStrategy):
     This class implements the Pfaffian using the determinant of the matrix for the forward pass and the
     derivative of the Pfaffian with respect to the input matrix for the backward pass.
     """
+
     NAME = "PfaffianPerm"
 
     @staticmethod
@@ -34,7 +34,7 @@ class PfaffianPerm(PfaffianStrategy):
                 for i in range(_i_matrix.shape[0])
                 for j in range(i, _j_matrix.shape[0])
             ],
-            axis=0
+            axis=0,
         )
 
         pf_matrix = torch.prod(matrix[..., ij_matrix[..., 0], ij_matrix[..., 1]], dim=-1)
@@ -57,7 +57,5 @@ class PfaffianPerm(PfaffianStrategy):
         matrix, pf = ctx.saved_tensors
         grad_matrix = None
         if ctx.needs_input_grad[0]:
-            grad_matrix = torch.einsum('...,...ij->...ji', 0.5 * grad_output * pf, torch.linalg.pinv(matrix))
+            grad_matrix = torch.einsum("...,...ij->...ji", 0.5 * grad_output * pf, torch.linalg.pinv(matrix))
         return grad_matrix
-
-

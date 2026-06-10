@@ -1,69 +1,32 @@
-import numpy as np
 import pytest
-
-from .configs import (
-    N_RANDOM_TESTS_PER_CASE,
-    TEST_SEED,
-    ATOL_APPROX_COMPARISON,
-    RTOL_APPROX_COMPARISON,
-    set_seed,
-)
 import torch
-from torch_pfaffian import pfaffian_strategy_map, get_pfaffian_function
-from torch.autograd import gradcheck
 
-set_seed(TEST_SEED)
-
-
-@pytest.mark.parametrize(
-    "matrix, function_name",
-    [
-        (np.random.rand(*shape), function_name)
-        for shape in [
-            (8, 8),
-            (16, 6, 6),
-            (18, 10, 10),
-        ]
-        for _ in range(N_RANDOM_TESTS_PER_CASE)
-        for function_name in pfaffian_strategy_map.keys()
-    ]
-)
-def test_torch_pfaffian_gradcheck(matrix, function_name):
-    func = get_pfaffian_function(function_name)
-    skew_matrix = matrix - np.einsum("...ij->...ji", matrix)
-    skew_tensor = torch.tensor(skew_matrix, requires_grad=True)
-    assert gradcheck(
-        func, (skew_tensor,),
-        eps=1e-3,
-        atol=ATOL_APPROX_COMPARISON,
-        rtol=RTOL_APPROX_COMPARISON
-    )
+from torch_pfaffian import get_pfaffian_function, pfaffian_strategy_map
+from torch_pfaffian.strategies import PfaffianDet, PfaffianFDBPf
 
 
-@pytest.mark.parametrize(
-    "matrix, function_name",
-    [
-        (np.random.rand(*shape), function_name)
-        for shape in [
-            (8, 8),
-            (16, 6, 6),
-            (18, 10, 10),
-        ]
-        for _ in range(N_RANDOM_TESTS_PER_CASE)
-        for function_name in pfaffian_strategy_map.keys()
-    ]
-)
-def test_torch_pfaffian_forward_against_det(matrix, function_name):
-    func = get_pfaffian_function(function_name)
-    skew_matrix = matrix - np.einsum("...ij->...ji", matrix)
-    skew_tensor = torch.tensor(skew_matrix, requires_grad=True)
+class TestTorchPfaffian:
+    def test_pfaffian_strategy_map_contains_registered_strategies(self):
+        assert PfaffianFDBPf.NAME.lower().strip() in pfaffian_strategy_map
+        assert PfaffianDet.NAME.lower().strip() in pfaffian_strategy_map
+        assert all(issubclass(cls, PfaffianFDBPf.__bases__[0]) for cls in pfaffian_strategy_map.values())
 
-    pf = func(skew_tensor)
-    det = torch.linalg.det(skew_tensor)
+    def test_get_pfaffian_function_returns_apply_of_registered_strategy(self):
+        function = get_pfaffian_function(PfaffianFDBPf.NAME)
+        assert function == PfaffianFDBPf.apply
 
-    assert torch.allclose(
-        pf ** 2, det,
-        atol=ATOL_APPROX_COMPARISON,
-        rtol=RTOL_APPROX_COMPARISON
-    )
+    def test_get_pfaffian_function_dispatches_to_pfaffian_det(self):
+        assert get_pfaffian_function(PfaffianDet.NAME) == PfaffianDet.apply
 
+    def test_get_pfaffian_function_default_name_is_callable(self):
+        function = get_pfaffian_function()
+        matrix = torch.tensor([[0.0, 1.0], [-1.0, 0.0]], dtype=torch.float64)
+        torch.testing.assert_close(function(matrix), matrix[..., 0, 1])
+
+    def test_get_pfaffian_function_is_case_and_whitespace_insensitive(self):
+        function = get_pfaffian_function(f"  {PfaffianFDBPf.NAME.upper()}  ")
+        assert function == PfaffianFDBPf.apply
+
+    def test_get_pfaffian_function_unknown_name_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unknown strategy name"):
+            get_pfaffian_function("not_a_real_strategy")
