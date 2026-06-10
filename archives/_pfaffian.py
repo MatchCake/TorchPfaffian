@@ -5,13 +5,12 @@ This file will be deleted before the final submission.
 It is used as a reference to implement the `pfaffian` functions.
 """
 
-
-from typing import Union, Literal, Optional
-import numpy as np
 import warnings
+from typing import Literal, Optional, Union
 
-import tqdm
+import numpy as np
 import pennylane as qml
+import tqdm
 
 from torch_pfaffian import Pfaffian
 
@@ -51,26 +50,24 @@ def _compute_gauss_vector(__matrix, k):
     zero_like = convert_and_cast_like(0, __matrix)
     tau_norm = __matrix[..., k, k + 1][..., None]
     zero_mask = qml.math.isclose(tau_norm, zero_like)
-    tau = qml.math.where(zero_mask, zero_like, __matrix[..., k, k + 2:] / tau_norm)
+    tau = qml.math.where(zero_mask, zero_like, __matrix[..., k, k + 2 :] / tau_norm)
     return tau
 
 
 def _update_matrix_block_kp2_kp2(__matrix, k, tau):
     add_matrix = qml.math.zeros_like(__matrix)
-    add_matrix[..., k + 2:, k + 2:] += (
-        qml.math.einsum("...i,...j->...ij", tau, __matrix[..., k + 2:, k + 1])
-        -
-        qml.math.einsum("...i,...j->...ij", __matrix[..., k + 2:, k + 1], tau)
-    )
+    add_matrix[..., k + 2 :, k + 2 :] += qml.math.einsum(
+        "...i,...j->...ij", tau, __matrix[..., k + 2 :, k + 1]
+    ) - qml.math.einsum("...i,...j->...ij", __matrix[..., k + 2 :, k + 1], tau)
     return __matrix + add_matrix
 
 
 def batch_pfaffian_ltl(
-        __matrix: TensorLike,
-        overwrite_input: bool = False,
-        test_input: bool = False,
-        p_bar: Optional[tqdm.tqdm] = None,
-        show_progress: bool = False
+    __matrix: TensorLike,
+    overwrite_input: bool = False,
+    test_input: bool = False,
+    p_bar: Optional[tqdm.tqdm] = None,
+    show_progress: bool = False,
 ) -> Union[float, complex, TensorLike]:
     r"""
     Compute the Pfaffian of a real or complex skew-symmetric
@@ -117,7 +114,7 @@ def batch_pfaffian_ltl(
 
     # Quick return if possible
     if n % 2 == 1:
-        p_bar.n = n//2
+        p_bar.n = n // 2
         p_bar.set_description("Odd-sized matrix")
         p_bar.close()
         return pfaffian_val * zero_like * matrix[..., 0, 0]  # 0.0 but with require grad if needed
@@ -125,7 +122,7 @@ def batch_pfaffian_ltl(
     p_bar.set_description(f"Computing Pfaffian of {shape} matrix")
     for k in p_bar:
         # First, find the largest entry in A[k+1:,k] and permute it to A[k+1,k]
-        kp = k + 1 + qml.math.abs(matrix[..., k + 1:, k]).argmax(-1)
+        kp = k + 1 + qml.math.abs(matrix[..., k + 1 :, k]).argmax(-1)
         kp1 = qml.math.convert_like(k + 1, kp)
 
         # Check if we need to pivot
@@ -139,7 +136,7 @@ def batch_pfaffian_ltl(
         zero_ss_condition = qml.math.isclose(matrix[..., k + 1, k], zero_like)
         pfaffian_val *= qml.math.where(zero_ss_condition, zero_like, matrix[..., k, k + 1])
         if qml.math.all(zero_ss_condition):
-            p_bar.n = n//2
+            p_bar.n = n // 2
             p_bar.set_description("Pfaffian is zero")
             p_bar.close()
             return pfaffian_val
@@ -176,7 +173,7 @@ def batch_householder_complex(x: TensorLike):
     v_frobenius_norm = qml.math.einsum("...i,...i->...", qml.math.conjugate(v), v) ** 0.5
     v = v / v_frobenius_norm[..., None]
 
-    tau = convert_and_cast_like(2.0+0.0j, x)
+    tau = convert_and_cast_like(2.0 + 0.0j, x)
     return v, tau, -phase * norm_x
 
 
@@ -200,14 +197,14 @@ def _eliminate_ith_column_householder(matrix, i, alpha):
     where_mask = qml.math.cast(qml.math.zeros_like(matrix), dtype=bool)
     where_mask[..., i + 1, i] = True
     where_mask[..., i, i + 1] = True
-    where_mask[..., i + 2:, i] = True
-    where_mask[..., i, i + 2:] = True
+    where_mask[..., i + 2 :, i] = True
+    where_mask[..., i, i + 2 :] = True
 
     values = qml.math.zeros_like(matrix)
     values[..., i + 1, i] = alpha
     values[..., i, i + 1] = -alpha
-    values[..., i + 2:, i] = zero_like
-    values[..., i, i + 2:] = zero_like
+    values[..., i + 2 :, i] = zero_like
+    values[..., i, i + 2 :] = zero_like
 
     matrix = qml.math.where(where_mask, values, matrix)
     return matrix
@@ -227,22 +224,20 @@ def _update_matrix_block_householder(matrix, i, v, tau):
     :param tau:
     :return:
     """
-    w = tau * qml.math.einsum("...ij,...j->...i", matrix[..., i + 1:, i + 1:], qml.math.conjugate(v))
+    w = tau * qml.math.einsum("...ij,...j->...i", matrix[..., i + 1 :, i + 1 :], qml.math.conjugate(v))
     values = qml.math.zeros_like(matrix)
-    values[..., i + 1:, i + 1:] += (
-        qml.math.einsum("...i,...j->...ij", v, w)
-        -
-        qml.math.einsum("...i,...j->...ij", w, v)
+    values[..., i + 1 :, i + 1 :] += qml.math.einsum("...i,...j->...ij", v, w) - qml.math.einsum(
+        "...i,...j->...ij", w, v
     )
     return matrix + values
 
 
 def batch_pfaffian_householder(
-        __matrix: TensorLike,
-        overwrite_input: bool = False,
-        test_input: bool = False,
-        p_bar: Optional[tqdm.tqdm] = None,
-        show_progress: bool = False
+    __matrix: TensorLike,
+    overwrite_input: bool = False,
+    test_input: bool = False,
+    p_bar: Optional[tqdm.tqdm] = None,
+    show_progress: bool = False,
 ):
     """pfaffian(A, overwrite_a=False)
 
@@ -284,7 +279,7 @@ def batch_pfaffian_householder(
     p_bar.set_description(f"Computing Pfaffian of {shape} matrix")
     for i in p_bar:
         # Find a Householder vector to eliminate the i-th column
-        v, tau, alpha = batch_householder_complex(matrix[..., i + 1:, i])
+        v, tau, alpha = batch_householder_complex(matrix[..., i + 1 :, i])
         matrix = _eliminate_ith_column_householder(matrix, i, alpha)
         matrix = _update_matrix_block_householder(matrix, i, v, tau)
 
@@ -299,10 +294,7 @@ def batch_pfaffian_householder(
 
 
 def pfaffian_by_det(
-        __matrix: TensorLike,
-        p_bar: Optional[tqdm.tqdm] = None,
-        show_progress: bool = False,
-        epsilon: float = 1e-12
+    __matrix: TensorLike, p_bar: Optional[tqdm.tqdm] = None, show_progress: bool = False, epsilon: float = 1e-12
 ):
     shape = qml.math.shape(__matrix)
     p_bar = p_bar or tqdm.tqdm(total=1, disable=not show_progress)
@@ -323,12 +315,12 @@ def pfaffian_by_det(
 
 
 def pfaffian(
-        __matrix: TensorLike,
-        overwrite_input: bool = False,
-        method: Literal["P", "H", "det", "bLTL", "bH"] = "bLTL",
-        epsilon: float = 1e-12,
-        p_bar: Optional[tqdm.tqdm] = None,
-        show_progress: bool = False
+    __matrix: TensorLike,
+    overwrite_input: bool = False,
+    method: Literal["P", "H", "det", "bLTL", "bH"] = "bLTL",
+    epsilon: float = 1e-12,
+    p_bar: Optional[tqdm.tqdm] = None,
+    show_progress: bool = False,
 ) -> Union[float, complex, TensorLike]:
     """pfaffian(A, overwrite_a=False, method='P')
 
@@ -362,17 +354,17 @@ def pfaffian(
 
     if method == "P":
         from pfapack.pfaffian import pfaffian
+
         warnings.warn(
-            "The method 'P' is not implemented yet. "
-            "It is recommended to use the method 'det' instead.",
+            "The method 'P' is not implemented yet. It is recommended to use the method 'det' instead.",
             UserWarning,
         )
         return pfaffian(__matrix, overwrite_input, method="P")
     elif method == "H":
         from pfapack.pfaffian import pfaffian_householder
+
         warnings.warn(
-            "The method 'H' is not implemented yet. "
-            "It is recommended to use the method 'det' instead.",
+            "The method 'H' is not implemented yet. It is recommended to use the method 'det' instead.",
             UserWarning,
         )
         return pfaffian_householder(__matrix, overwrite_input)

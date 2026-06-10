@@ -10,21 +10,21 @@
 ![Tests Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/tests.yml/badge.svg)
 ![Dist Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/build_dist.yml/badge.svg)
 ![Doc Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/docs.yml/badge.svg)
-![Publish Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/publish.yml/badge.svg)
+![Coverage Badge Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/coverage_badge.yml/badge.svg)
 
 
 # Description
 
-TorchPfaffian is a Python package for efficiently computing the Pfaffian of skew-symmetric matrices using PyTorch. 
-Designed as a PyTorch-based alternative to [pfapack](https://github.com/basnijholt/pfapack), it enables GPU 
-acceleration and supports automatic differentiation, making it particularly useful in physics, quantum computing, 
-and machine learning applications.  
+TorchPfaffian is a Python package for efficiently computing the Pfaffian of skew-symmetric matrices using PyTorch.
+Designed as a PyTorch-based alternative to [pfapack](https://github.com/basnijholt/pfapack), it enables GPU
+acceleration and supports automatic differentiation, making it particularly useful in physics, quantum computing,
+and machine learning applications.
 
 ## Features:
-- Efficient Pfaffian computation for skew-symmetric matrices  
-- GPU acceleration via PyTorch  
-- Support for automatic differentiation  
-- Seamless integration with PyTorch tensors  
+- Efficient Pfaffian computation for skew-symmetric matrices
+- GPU acceleration via PyTorch
+- Support for automatic differentiation
+- Seamless integration with PyTorch tensors
 
 
 
@@ -36,10 +36,13 @@ With `python` and `pip` installed, run the following commands to install TorchPf
 pip install torchpfaffian
 ```
 
-With `poetry` installed, run the following commands to install TorchPfaffian:
+For development, this project uses [uv](https://docs.astral.sh/uv/). Clone the repository and set up the
+environment with:
 ```bash
-poetry add torchpfaffian
+uv sync --dev --extra cpu
 ```
+Use the `cu128` or `cu130` extra instead of `cpu` to install a CUDA-enabled build of PyTorch. See
+[.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for the full contribution workflow.
 
 
 # Important Links

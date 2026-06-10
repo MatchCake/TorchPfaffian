@@ -1,5 +1,7 @@
-from typing import Any
+from typing import cast
+
 import torch
+
 from .strategy import PfaffianStrategy
 
 
@@ -10,6 +12,7 @@ class PfaffianBlockDet(PfaffianStrategy):
 
     The input matrix is considered to be a skew-symmetric matrix.
     """
+
     NAME = "PfaffianBlockDet"
 
     @staticmethod
@@ -22,24 +25,31 @@ class PfaffianBlockDet(PfaffianStrategy):
         # take the upper right block of shape (..., N, N) of the input matrix
         n = matrix.shape[-1] // 2
         sub_matrix = matrix[..., :n, n:]
-        pf = (-1)**(n*(n-1)//2) * torch.linalg.det(sub_matrix)
+        pf = (-1) ** (n * (n - 1) // 2) * torch.linalg.det(sub_matrix)
         return pf
 
     @staticmethod
-    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output):
+    def backward(ctx: torch.autograd.function.BackwardCFunction, grad_output):
         r"""
+        Compute the gradient of the Pfaffian with respect to the full input matrix.
 
-        ..math:
-            \frac{\partial \text{pf}(A)}{\partial A_{ij}} = \frac{\text{pf}(A)}{2} A^{-1}_{ji}
+        The forward depends only on the upper-right block ``block = matrix[..., :n, n:]`` through
+        ``pf = c * det(block)``. By Jacobi's formula ``d det(block) / d block = det(block) * (block^{-1})^T``,
+        so ``d pf / d block = pf * (block^{-1})^T``. The gradient is therefore zero everywhere except in
+        the upper-right block.
 
-        :param ctx: Context
-        :param grad_output: Gradient of the output
-        :return: Gradient of the input
+        :param ctx: Context holding the saved input matrix and the forward Pfaffian.
+        :param grad_output: Gradient of the output with respect to the loss.
+        :return: Gradient of the input matrix, or ``None`` when the input does not require grad.
+        :rtype: torch.Tensor | None
         """
-        matrix, pf = ctx.saved_tensors
+        matrix, pf = cast("tuple[torch.Tensor, torch.Tensor]", ctx.saved_tensors)
         grad_matrix = None
         if ctx.needs_input_grad[0]:
-            grad_matrix = torch.einsum('...,...ij->...ji', 0.5 * grad_output * pf, torch.linalg.pinv(matrix))
+            n = matrix.shape[-1] // 2
+            sub_matrix = matrix[..., :n, n:]  # (..., n, n) upper-right block
+            inverse_transpose = torch.linalg.inv(sub_matrix).transpose(-1, -2)
+            grad_block = grad_output[..., None, None] * pf[..., None, None] * inverse_transpose
+            grad_matrix = torch.zeros_like(matrix)
+            grad_matrix[..., :n, n:] = grad_block
         return grad_matrix
-
-
