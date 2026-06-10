@@ -45,6 +45,28 @@ Use the `cu128` or `cu130` extra instead of `cpu` to install a CUDA-enabled buil
 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for the full contribution workflow.
 
 
+## Usage
+
+```python
+import torch
+
+from torch_pfaffian import pfaffian
+
+# Any skew-symmetric matrix of shape (..., 2n, 2n).
+matrix = torch.tensor([[0.0, -3.0], [3.0, 0.0]])
+
+pf = pfaffian(matrix)                 # signed Pfaffian (default)
+magnitude = pfaffian(matrix, sign=False)  # |pf|, using the faster det-based path
+```
+
+`pfaffian()` selects a strategy from the input: `sign=True` (the default) returns the
+**signed** Pfaffian via `PfaffianParlettReid`; `sign=False` returns the magnitude using a
+determinant-based strategy (`PfaffianFDBPf` when gradients are needed, otherwise
+`PfaffianDet`). The `optimize` argument (`"auto"`, `"time"`, `"memory"`) is reserved as a
+tie-breaker for future strategies. For explicit strategy selection, use
+`get_pfaffian_function(name)`.
+
+
 # Important Links
 - Documentation at [https://MatchCake.github.io/TorchPfaffian/](https://MatchCake.github.io/TorchPfaffian/).
 - Github at [https://github.com/MatchCake/TorchPfaffian/](https://github.com/MatchCake/TorchPfaffian/).
