@@ -178,6 +178,7 @@ instance/
 # Sphinx documentation
 docs/_build/
 doc/_build/
+sphinx/source/notebooks/
 
 # PyBuilder
 target/
@@ -294,6 +295,7 @@ pip-selfcheck.json
 
 user/
 tests/tmp
+tests/.tmp
 .report.json
 tests/master_src
 report_dir
@@ -302,3 +304,6 @@ out
 tmp_report_dir
 .tmp_report.json
 coverage.json
+dist/*.whl
+dist/*.tar.gz
+/.claude

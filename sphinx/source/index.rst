@@ -14,6 +14,12 @@ Welcome to <PackageName>'s documentation!
 
 .. toctree::
    :maxdepth: 4
+   :caption: Tutorials:
+
+   notebooks/strategies_benchmark
+
+.. toctree::
+   :maxdepth: 4
    :caption: Modules:
 
    torch_pfaffian

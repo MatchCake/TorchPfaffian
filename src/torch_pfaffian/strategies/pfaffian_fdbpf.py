@@ -1,5 +1,7 @@
-from typing import Any
+from typing import cast
+
 import torch
+
 from .strategy import PfaffianStrategy
 
 
@@ -8,6 +10,7 @@ class PfaffianFDBPf(PfaffianStrategy):
     This class implements the Pfaffian using the determinant of the matrix for the forward pass and the
     derivative of the Pfaffian with respect to the input matrix for the backward pass.
     """
+
     NAME = "PfaffianFDBPf"
 
     @staticmethod
@@ -16,11 +19,11 @@ class PfaffianFDBPf(PfaffianStrategy):
         if _2n % 2 != 0:
             return torch.zeros_like(matrix[..., 0, 0])
         det = torch.linalg.det(matrix)
-        pf = torch.sqrt(torch.abs(det) + PfaffianFDBPf.EPSILON)
+        pf = torch.sqrt(torch.clamp(torch.abs(det), min=PfaffianFDBPf.EPSILON))
         return pf
 
     @staticmethod
-    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output):
+    def backward(ctx: torch.autograd.function.BackwardCFunction, grad_output):
         r"""
 
         ..math:
@@ -30,10 +33,8 @@ class PfaffianFDBPf(PfaffianStrategy):
         :param grad_output: Gradient of the output
         :return: Gradient of the input
         """
-        matrix, pf = ctx.saved_tensors
+        matrix, pf = cast("tuple[torch.Tensor, torch.Tensor]", ctx.saved_tensors)
         grad_matrix = None
         if ctx.needs_input_grad[0]:
-            grad_matrix = torch.einsum('...,...ij->...ji', 0.5 * grad_output * pf, torch.linalg.pinv(matrix))
+            grad_matrix = torch.einsum("...,...ij->...ji", 0.5 * grad_output * pf, torch.linalg.pinv(matrix))
         return grad_matrix
-
-
