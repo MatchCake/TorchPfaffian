@@ -1,0 +1,29 @@
+torch\_pfaffian package
+=======================
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   torch_pfaffian.strategies
+
+Submodules
+----------
+
+torch\_pfaffian.utils module
+----------------------------
+
+.. automodule:: torch_pfaffian.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: torch_pfaffian
+   :members:
+   :undoc-members:
+   :show-inheritance:
