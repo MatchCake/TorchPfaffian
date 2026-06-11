@@ -3,7 +3,9 @@ import pytest
 import torch
 from torch.autograd import gradcheck
 
-from tests.configs import (
+pytest.importorskip("torch_pfaffian._rust")
+
+from tests.configs import (  # noqa: E402
     ATOL_APPROX_COMPARISON,
     ATOL_MATRIX_COMPARISON,
     ATOL_SCALAR_COMPARISON,
@@ -13,16 +15,16 @@ from tests.configs import (
     RTOL_SCALAR_COMPARISON,
     TEST_SEED,
 )
-from torch_pfaffian.strategies.pfaffian_block_det import PfaffianBlockDet
-from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid
+from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid  # noqa: E402
+from torch_pfaffian.strategies.pfaffian_rust_parlett_reid import RustPfaffianParlettReid  # noqa: E402
 
 _RNG = np.random.default_rng(TEST_SEED)
 _HALF_SIZES = [1, 2, 3, 4]
 _RANDOM_BLOCKS = [_RNG.random((size, size)) for size in _HALF_SIZES for _ in range(N_RANDOM_TESTS_PER_CASE)]
+_GRADCHECK_DIMENSIONS = [2, 4, 6]
 
 
 def _block_antidiagonal(block: np.ndarray) -> torch.Tensor:
-    # Skew matrix [[0, block], [-block^T, 0]]; PfaffianBlockDet gives its exact signed Pfaffian.
     zero = np.zeros_like(block)
     top = np.concatenate([zero, block], axis=-1)
     bottom = np.concatenate([-np.einsum("...ij->...ji", block), zero], axis=-1)
@@ -35,32 +37,30 @@ def _random_skew(dimension: int, rng: np.random.Generator) -> torch.Tensor:
     return torch.tensor(skew - skew.T)
 
 
-_GRADCHECK_DIMENSIONS = [2, 4, 6]
-
-
 def _skew_from_parameters(parameters: torch.Tensor, dimension: int) -> torch.Tensor:
-    # Build a skew-symmetric A(theta) from the free strictly-upper-triangular entries so that
-    # gradcheck differentiates on the manifold where the Pfaffian is defined.
     upper = torch.zeros(dimension, dimension, dtype=parameters.dtype)
     indices = torch.triu_indices(dimension, dimension, offset=1)
     upper = upper.index_put((indices[0], indices[1]), parameters)
     return upper - upper.transpose(-1, -2)
 
 
-class TestPfaffianParlettReid:
+class TestRustPfaffianParlettReid:
+    @pytest.mark.parametrize("block", _RANDOM_BLOCKS)
+    def test_forward_matches_python_parlett_reid(self, block):
+        matrix = _block_antidiagonal(block)
+        torch.testing.assert_close(
+            RustPfaffianParlettReid.apply(matrix),
+            PfaffianParlettReid.apply(matrix),
+            atol=ATOL_MATRIX_COMPARISON,
+            rtol=RTOL_MATRIX_COMPARISON,
+        )
+
     @pytest.mark.parametrize("block", _RANDOM_BLOCKS)
     def test_forward_square_matches_determinant(self, block):
         matrix = _block_antidiagonal(block)
-        pfaffian = PfaffianParlettReid.apply(matrix)
-        determinant = torch.linalg.det(matrix)
-        torch.testing.assert_close(pfaffian**2, determinant, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
-
-    @pytest.mark.parametrize("block", _RANDOM_BLOCKS)
-    def test_forward_sign_matches_block_det(self, block):
-        matrix = _block_antidiagonal(block)
         torch.testing.assert_close(
-            PfaffianParlettReid.apply(matrix),
-            PfaffianBlockDet.apply(matrix),
+            RustPfaffianParlettReid.apply(matrix) ** 2,
+            torch.linalg.det(matrix),
             atol=ATOL_MATRIX_COMPARISON,
             rtol=RTOL_MATRIX_COMPARISON,
         )
@@ -68,16 +68,15 @@ class TestPfaffianParlettReid:
     def test_forward_two_by_two_is_signed(self):
         matrix = torch.tensor([[0.0, -3.0], [3.0, 0.0]], dtype=torch.float64)
         torch.testing.assert_close(
-            PfaffianParlettReid.apply(matrix),
+            RustPfaffianParlettReid.apply(matrix),
             torch.tensor(-3.0, dtype=torch.float64),
             atol=ATOL_SCALAR_COMPARISON,
             rtol=RTOL_SCALAR_COMPARISON,
         )
 
     def test_forward_supports_leading_batch_dims(self):
-        blocks = _RNG.random((2, 3, 4, 4))
-        matrix = _block_antidiagonal(blocks)
-        pfaffian = PfaffianParlettReid.apply(matrix)
+        matrix = _block_antidiagonal(_RNG.random((2, 3, 4, 4)))
+        pfaffian = RustPfaffianParlettReid.apply(matrix)
         assert pfaffian.shape == matrix.shape[:-2]
         torch.testing.assert_close(
             pfaffian**2, torch.linalg.det(matrix), atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
@@ -86,14 +85,29 @@ class TestPfaffianParlettReid:
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     def test_forward_preserves_dtype_and_device(self, dtype):
         matrix = _random_skew(6, _RNG).to(dtype)
-        pfaffian = PfaffianParlettReid.apply(matrix)
+        pfaffian = RustPfaffianParlettReid.apply(matrix)
         assert pfaffian.dtype == dtype
         assert pfaffian.device == matrix.device
+
+    def test_forward_float32_kernel_matches_float64(self):
+        # The float32 input must route to the single-precision Rust kernel and agree with the
+        # double-precision result within single-precision tolerance.
+        matrix_double = _block_antidiagonal(_RNG.random((3, 4, 4)))
+        matrix_single = matrix_double.to(torch.float32)
+        result_single = RustPfaffianParlettReid.apply(matrix_single)
+        result_double = RustPfaffianParlettReid.apply(matrix_double)
+        assert result_single.dtype == torch.float32
+        torch.testing.assert_close(
+            result_single,
+            result_double.to(torch.float32),
+            atol=ATOL_APPROX_COMPARISON,
+            rtol=RTOL_APPROX_COMPARISON,
+        )
 
     def test_forward_odd_dimension_is_zero(self):
         matrix = _random_skew(5, _RNG)
         torch.testing.assert_close(
-            PfaffianParlettReid.apply(matrix),
+            RustPfaffianParlettReid.apply(matrix),
             torch.zeros((), dtype=matrix.dtype),
             atol=ATOL_SCALAR_COMPARISON,
             rtol=RTOL_SCALAR_COMPARISON,
@@ -102,19 +116,18 @@ class TestPfaffianParlettReid:
     def test_forward_empty_matrix_is_one(self):
         matrix = torch.zeros((0, 0), dtype=torch.float64)
         torch.testing.assert_close(
-            PfaffianParlettReid.apply(matrix),
+            RustPfaffianParlettReid.apply(matrix),
             torch.ones((), dtype=torch.float64),
             atol=ATOL_SCALAR_COMPARISON,
             rtol=RTOL_SCALAR_COMPARISON,
         )
 
     def test_forward_singular_matrix_is_zero(self):
-        # A skew matrix with a zero pivot column has Pfaffian 0.
         matrix = torch.zeros((4, 4), dtype=torch.float64)
         matrix[2, 3] = 1.0
         matrix[3, 2] = -1.0
         torch.testing.assert_close(
-            PfaffianParlettReid.apply(matrix),
+            RustPfaffianParlettReid.apply(matrix),
             torch.zeros((), dtype=torch.float64),
             atol=ATOL_SCALAR_COMPARISON,
             rtol=RTOL_SCALAR_COMPARISON,
@@ -125,7 +138,7 @@ class TestPfaffianParlettReid:
         count = dimension * (dimension - 1) // 2
         parameters = torch.tensor(_RNG.random(count) + 0.5, dtype=torch.float64, requires_grad=True)
         assert gradcheck(
-            lambda values: PfaffianParlettReid.apply(_skew_from_parameters(values, dimension)),
+            lambda values: RustPfaffianParlettReid.apply(_skew_from_parameters(values, dimension)),
             (parameters,),
             eps=1e-6,
             atol=ATOL_APPROX_COMPARISON,
@@ -140,16 +153,16 @@ class TestPfaffianParlettReid:
         matrix[2, 3] = 1.0
         matrix[3, 2] = -1.0
         matrix.requires_grad_(True)
-        PfaffianParlettReid.apply(matrix).backward()
+        RustPfaffianParlettReid.apply(matrix).backward()
         assert matrix.grad is not None
         assert torch.isfinite(matrix.grad).all()
 
     def test_backward_returns_none_when_input_does_not_require_grad(self):
         matrix = _random_skew(4, _RNG)
-        pfaffian = PfaffianParlettReid.apply(matrix)
+        pfaffian = RustPfaffianParlettReid.apply(matrix)
 
         class _Context:
             saved_tensors = (matrix, pfaffian)
             needs_input_grad = (False,)
 
-        assert PfaffianParlettReid.backward(_Context(), torch.ones_like(pfaffian)) is None
+        assert RustPfaffianParlettReid.backward(_Context(), torch.ones_like(pfaffian)) is None

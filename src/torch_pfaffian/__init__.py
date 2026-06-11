@@ -10,7 +10,10 @@ __copyright__ = "Copyright 2024, Jérémie Gince"
 __license__ = "Apache 2.0"
 __url__ = "https://github.com/MatchCake/TorchPfaffian"
 __package__ = "torch_pfaffian"
-__version__ = importlib_metadata.version(__package__)
+try:
+    __version__ = importlib_metadata.version(__package__)
+except importlib_metadata.PackageNotFoundError:
+    __version__ = importlib_metadata.version("TorchPfaffian")
 
 import warnings
 from collections.abc import Callable
@@ -33,38 +36,59 @@ def get_pfaffian_function(name: str = PfaffianFDBPf.NAME) -> Callable[[torch.Ten
     return pfaffian_strategy_map[name].apply
 
 
-_OPTIMIZE_CHOICES = ("auto", "time", "memory")
-
-
-def pfaffian(matrix: torch.Tensor, *, sign: bool = True, optimize: str = "auto") -> torch.Tensor:
+def pfaffian(matrix: torch.Tensor, *, sign: bool = True, check_input: bool = False) -> torch.Tensor:
     """
-    Compute the Pfaffian of a skew-symmetric matrix, choosing a strategy from the input.
+    Compute the Pfaffian of a skew-symmetric matrix, choosing the strategy from the input.
 
     The matrix has shape ``(..., 2n, 2n)`` and the result has shape ``(...,)``, sharing the
     backend, dtype, and device of ``matrix``.
 
-    Strategy selection (``optimize="auto"``):
+    Strategy selection:
 
-    ===========================  ======================  =================================================
-    Condition                    Strategy                Reason
-    ===========================  ======================  =================================================
-    ``sign=True`` (default)      ``PfaffianParlettReid`` only general strategy that returns the sign
-    ``sign=False``, grad needed  ``PfaffianFDBPf``       magnitude only; robust analytic backward (pinv)
-    ``sign=False``, no grad      ``PfaffianDet``         cheapest: ``sqrt(|det|)`` only
-    ===========================  ======================  =================================================
+    =============================  ===========================  ===============================================
+    Condition                      Strategy                     Reason
+    =============================  ===========================  ===============================================
+    ``sign=True``, Rust available  ``RustPfaffianParlettReid``  fastest signed path (native Rust kernel)
+    ``sign=True``, Rust not built  ``PfaffianParlettReid``      pure-Python signed fallback
+    ``sign=False``, grad needed    ``PfaffianFDBPf``            magnitude only; robust analytic backward (pinv)
+    ``sign=False``, no grad        ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
+    =============================  ===========================  ===============================================
+
+    The Pfaffian is only defined for skew-symmetric matrices; the strategies assume this and do not
+    check it. Pass ``check_input=True`` to validate the assumption. For large matrices the Pfaffian
+    can exceed the floating range and overflow to ``inf``; a ``RuntimeWarning`` is emitted when the
+    result is not finite.
 
     :param matrix: Skew-symmetric matrix of shape ``(..., 2n, 2n)``.
     :param sign: When ``True`` (default) return the signed Pfaffian, otherwise its magnitude.
-    :param optimize: Optimization target, one of ``"auto"``, ``"time"``, ``"memory"``. Currently a
-        tie-breaker reserved for when more strategies are available; ``"auto"`` follows the table above.
+    :param check_input: When ``True``, validate that ``matrix`` is square in its last two dimensions
+        and skew-symmetric (``A == -A^T``) before computing, raising ``ValueError`` otherwise. Off by
+        default (``False``) so trusted inputs pay nothing; the check is an O(n^2) comparison, cheap
+        relative to the O(n^3) Pfaffian.
     :return: The Pfaffian of the input, of shape ``(...,)``.
     :rtype: torch.Tensor
     """
-    if optimize not in _OPTIMIZE_CHOICES:
-        raise ValueError(f"Unknown optimize value: {optimize!r}. Choose from {_OPTIMIZE_CHOICES}.")
+    if check_input:
+        if matrix.shape[-1] != matrix.shape[-2]:
+            raise ValueError(f"Expected a square matrix in the last two dimensions, got shape {tuple(matrix.shape)}.")
+        if not torch.allclose(matrix, -matrix.transpose(-1, -2)):
+            raise ValueError("Input matrix is not skew-symmetric (A != -A^T).")
+
     if sign:
-        return PfaffianParlettReid.apply(matrix)
-    grad_needed = matrix.requires_grad and torch.is_grad_enabled()
-    if grad_needed:
-        return PfaffianFDBPf.apply(matrix)
-    return PfaffianDet.apply(matrix)
+        if RustPfaffianParlettReid is not None:
+            result = RustPfaffianParlettReid.apply(matrix)
+        else:
+            result = PfaffianParlettReid.apply(matrix)
+    elif matrix.requires_grad and torch.is_grad_enabled():
+        result = PfaffianFDBPf.apply(matrix)
+    else:
+        result = PfaffianDet.apply(matrix)
+
+    if not torch.isfinite(result).all():
+        warnings.warn(
+            "Pfaffian is not finite (overflow to inf/nan): its magnitude exceeds the floating range "
+            "of the input dtype at this matrix dimension. Consider a higher-precision dtype.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return result

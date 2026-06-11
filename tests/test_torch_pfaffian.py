@@ -9,6 +9,14 @@ from torch_pfaffian.strategies import PfaffianDet, PfaffianFDBPf, PfaffianParlet
 
 
 class TestTorchPfaffian:
+    def test_rust_parlett_reid_registered_when_available(self):
+        pytest.importorskip("torch_pfaffian._rust")
+        from torch_pfaffian.strategies import RustPfaffianParlettReid
+
+        assert RustPfaffianParlettReid is not None
+        assert RustPfaffianParlettReid.NAME.lower().strip() in pfaffian_strategy_map
+        assert get_pfaffian_function(RustPfaffianParlettReid.NAME) == RustPfaffianParlettReid.apply
+
     def test_pfaffian_strategy_map_contains_registered_strategies(self):
         assert PfaffianFDBPf.NAME.lower().strip() in pfaffian_strategy_map
         assert PfaffianDet.NAME.lower().strip() in pfaffian_strategy_map
@@ -52,12 +60,18 @@ class TestTorchPfaffian:
         torch.testing.assert_close(pfaffian(matrix, sign=False), PfaffianDet.apply(matrix))
         assert pfaffian(matrix, sign=False).item() > 0
 
-    def test_pfaffian_invalid_optimize_raises_value_error(self):
-        with pytest.raises(ValueError, match="optimize"):
-            pfaffian(self._skew_matrix(), optimize="fastest")
+    def test_pfaffian_routes_sign_true_to_rust_when_available(self):
+        pytest.importorskip("torch_pfaffian._rust")
+        with mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake:
+            fake.apply.return_value = torch.zeros(())
+            pfaffian(self._skew_matrix(), sign=True)
+            fake.apply.assert_called_once()
 
-    def test_pfaffian_routes_sign_true_to_parlett_reid(self):
-        with mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake:
+    def test_pfaffian_routes_sign_true_to_python_when_rust_unavailable(self):
+        with (
+            mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid", None),
+            mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake,
+        ):
             fake.apply.return_value = torch.zeros(())
             pfaffian(self._skew_matrix(), sign=True)
             fake.apply.assert_called_once()
@@ -80,3 +94,32 @@ class TestTorchPfaffian:
         pfaffian(matrix).backward()
         assert matrix.grad is not None
         assert matrix.grad.shape == matrix.shape
+
+    def test_pfaffian_check_input_rejects_non_skew(self):
+        non_skew = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        with pytest.raises(ValueError, match="skew-symmetric"):
+            pfaffian(non_skew, check_input=True)
+
+    def test_pfaffian_check_input_rejects_non_square(self):
+        non_square = torch.zeros((2, 4), dtype=torch.float64)
+        with pytest.raises(ValueError, match="square"):
+            pfaffian(non_square, check_input=True)
+
+    def test_pfaffian_check_input_accepts_skew_matrix(self):
+        matrix = self._skew_matrix()
+        torch.testing.assert_close(pfaffian(matrix, check_input=True), pfaffian(matrix))
+
+    def test_pfaffian_check_input_off_by_default_allows_non_skew(self):
+        non_skew = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        pfaffian(non_skew)  # no validation by default, so no error is raised
+
+    def test_pfaffian_warns_when_result_overflows(self):
+        # A 4x4 block-antidiagonal with huge entries makes the Pfaffian overflow to inf.
+        block = torch.tensor([[1e200, 0.0], [0.0, 1e200]], dtype=torch.float64)
+        zero = torch.zeros_like(block)
+        top = torch.cat([zero, block], dim=-1)
+        bottom = torch.cat([-block.transpose(-1, -2), zero], dim=-1)
+        matrix = torch.cat([top, bottom], dim=-2)
+        with pytest.warns(RuntimeWarning, match="not finite"):
+            result = pfaffian(matrix)
+        assert not torch.isfinite(result).all()

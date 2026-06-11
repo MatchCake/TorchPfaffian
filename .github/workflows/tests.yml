@@ -37,6 +37,10 @@ jobs:
         run: |
           uv venv .venv
           uv sync --locked --dev --extra cpu
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build native extension
+        run: uv run maturin develop -m rust/Cargo.toml
       - name: Test Linting
         run: |
           uv run ruff format --check src tests
@@ -99,6 +103,10 @@ jobs:
         run: |
           uv venv .venv
           uv sync --locked --dev --extra cpu
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build native extension
+        run: uv run maturin develop -m rust/Cargo.toml
       - name: Test Unittests with pytest
         run: |
           uv run pytest tests --session-timeout=600
