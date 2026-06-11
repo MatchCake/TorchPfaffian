@@ -51,6 +51,9 @@ jobs:
         uv version ${{steps.version.outputs.new_tag}}
         uv lock
 
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
     - name: Build dist
       run: |
         uv run python -m build --sdist --wheel --no-isolation --outdir dist/ .

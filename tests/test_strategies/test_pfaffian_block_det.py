@@ -80,3 +80,15 @@ class TestPfaffianBlockDet:
             needs_input_grad = (False,)
 
         assert PfaffianBlockDet.backward(_Context(), torch.ones_like(pfaffian)) is None
+
+    def test_adjugate_override_delegates_to_parlett_reid(self):
+        # PfaffianBlockDet.forward is block-only, so its adjugate must defer to the general strategy.
+        from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid
+
+        matrices = _block_antidiagonal(_RNG.random((3, 3, 3)))
+        torch.testing.assert_close(
+            PfaffianBlockDet._pfaffian_adjugate(matrices),
+            PfaffianParlettReid._pfaffian_adjugate(matrices),
+            atol=ATOL_MATRIX_COMPARISON,
+            rtol=RTOL_MATRIX_COMPARISON,
+        )

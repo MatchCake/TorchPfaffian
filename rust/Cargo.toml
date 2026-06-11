@@ -1,0 +1,15 @@
+[package]
+name = "torch_pfaffian_rust"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["abi3-py310", "extension-module"] }
+numpy = "0.23"
+ndarray = "0.16"
+num-traits = "0.2"
+rayon = "1"

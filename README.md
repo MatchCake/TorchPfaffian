@@ -44,6 +44,43 @@ uv sync --dev --extra cpu
 Use the `cu128` or `cu130` extra instead of `cpu` to install a CUDA-enabled build of PyTorch. See
 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for the full contribution workflow.
 
+### Native acceleration (optional)
+
+A Rust-accelerated signed-Pfaffian strategy (`RustPfaffianParlettReid`) is available when the
+package is built with its native extension. Building from source requires a Rust toolchain
+(<https://rustup.rs>); the project builds with [maturin](https://www.maturin.rs):
+
+```bash
+uv run maturin develop --release -m rust/Cargo.toml
+```
+
+Use `--release` for an optimized build: `maturin develop` compiles in debug mode by default,
+which makes the Rust kernel much slower. Installing a prebuilt wheel (or `maturin build`) is already
+optimized, so this only matters for local development builds.
+
+If the native extension is not present, the package still works using the pure-Python strategies.
+
+
+## Usage
+
+```python
+import torch
+
+from torch_pfaffian import pfaffian
+
+# Any skew-symmetric matrix of shape (..., 2n, 2n).
+matrix = torch.tensor([[0.0, -3.0], [3.0, 0.0]])
+
+pf = pfaffian(matrix)                 # signed Pfaffian (default)
+magnitude = pfaffian(matrix, sign=False)  # |pf|, using the faster det-based path
+```
+
+`pfaffian()` selects a strategy from the input: `sign=True` (the default) returns the
+**signed** Pfaffian, using the native `RustPfaffianParlettReid` when the extension is built and
+falling back to the pure-Python `PfaffianParlettReid` otherwise; `sign=False` returns the magnitude
+using a determinant-based strategy (`PfaffianFDBPf` when gradients are needed, otherwise
+`PfaffianDet`). For explicit strategy selection, use `get_pfaffian_function(name)`.
+
 
 # Important Links
 - Documentation at [https://MatchCake.github.io/TorchPfaffian/](https://MatchCake.github.io/TorchPfaffian/).

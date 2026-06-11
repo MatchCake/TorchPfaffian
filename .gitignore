@@ -306,3 +306,4 @@ tmp_report_dir
 coverage.json
 dist/*.whl
 dist/*.tar.gz
+/.claude
