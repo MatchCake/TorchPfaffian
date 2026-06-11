@@ -45,14 +45,17 @@ def pfaffian(matrix: torch.Tensor, *, sign: bool = True, check_input: bool = Fal
 
     Strategy selection:
 
-    =============================  ===========================  ===============================================
-    Condition                      Strategy                     Reason
-    =============================  ===========================  ===============================================
-    ``sign=True``, Rust available  ``RustPfaffianParlettReid``  fastest signed path (native Rust kernel)
-    ``sign=True``, Rust not built  ``PfaffianParlettReid``      pure-Python signed fallback
-    ``sign=False``, grad needed    ``PfaffianFDBPf``            magnitude only; robust analytic backward (pinv)
-    ``sign=False``, no grad        ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
-    =============================  ===========================  ===============================================
+    ===================================  ===========================  =========================================
+    Condition                            Strategy                     Reason
+    ===================================  ===========================  =========================================
+    ``sign=True``, Rust built, CPU input  ``RustPfaffianParlettReid``  fastest signed path (native Rust kernel)
+    ``sign=True``, otherwise              ``PfaffianParlettReid``      GPU-native and pure-Python fallback
+    ``sign=False``, grad needed           ``PfaffianFDBPf``            magnitude only; robust analytic backward
+    ``sign=False``, no grad               ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
+    ===================================  ===========================  =========================================
+
+    The Rust kernel runs on CPU, so a non-CPU (e.g. CUDA) input is routed to ``PfaffianParlettReid``,
+    which runs natively on the input device and avoids a host round-trip.
 
     The Pfaffian is only defined for skew-symmetric matrices; the strategies assume this and do not
     check it. Pass ``check_input=True`` to validate the assumption. For large matrices the Pfaffian
@@ -75,7 +78,8 @@ def pfaffian(matrix: torch.Tensor, *, sign: bool = True, check_input: bool = Fal
             raise ValueError("Input matrix is not skew-symmetric (A != -A^T).")
 
     if sign:
-        if RustPfaffianParlettReid is not None:
+        # The Rust kernel is CPU-only, so non-CPU inputs use the device-native PyTorch strategy.
+        if RustPfaffianParlettReid is not None and matrix.device.type == "cpu":
             result = RustPfaffianParlettReid.apply(matrix)
         else:
             result = PfaffianParlettReid.apply(matrix)

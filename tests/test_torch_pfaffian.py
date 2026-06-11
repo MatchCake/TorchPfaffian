@@ -76,6 +76,20 @@ class TestTorchPfaffian:
             pfaffian(self._skew_matrix(), sign=True)
             fake.apply.assert_called_once()
 
+    def test_pfaffian_sign_true_routes_to_python_on_non_cpu_device(self):
+        # The Rust kernel is CPU-only, so a non-CPU input must use the device-native PyTorch strategy.
+        pytest.importorskip("torch_pfaffian._rust")
+        non_cpu_matrix = mock.MagicMock()
+        non_cpu_matrix.device.type = "cuda"
+        with (
+            mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust,
+            mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake_python,
+        ):
+            fake_python.apply.return_value = torch.zeros(())
+            pfaffian(non_cpu_matrix, sign=True)
+            fake_python.apply.assert_called_once()
+            fake_rust.apply.assert_not_called()
+
     def test_pfaffian_routes_magnitude_no_grad_to_det(self):
         with mock.patch.object(torch_pfaffian, "PfaffianDet") as fake:
             fake.apply.return_value = torch.zeros(())

@@ -10,5 +10,5 @@ from .strategy import PfaffianStrategy
 
 try:
     from .pfaffian_rust_parlett_reid import RustPfaffianParlettReid
-except ImportError:
-    RustPfaffianParlettReid = None
+except ImportError:  # pragma: no cover
+    RustPfaffianParlettReid = None  # pragma: no cover
