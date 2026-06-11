@@ -178,6 +178,7 @@ markupsafe==3.0.3
     #   jinja2
     #   nbconvert
 matplotlib==3.10.9
+    # via seaborn
 matplotlib-inline==0.2.2
     # via
     #   ipykernel
@@ -232,11 +233,15 @@ numpy==2.2.6 ; python_full_version < '3.11'
     # via
     #   contourpy
     #   matplotlib
+    #   pandas
+    #   seaborn
     #   torchpfaffian
 numpy==2.4.6 ; python_full_version >= '3.11'
     # via
     #   contourpy
     #   matplotlib
+    #   pandas
+    #   seaborn
     #   torchpfaffian
 packaging==26.2
     # via
@@ -247,6 +252,10 @@ packaging==26.2
     #   pytest
     #   sphinx
     #   twine
+pandas==2.3.3 ; python_full_version < '3.11'
+    # via seaborn
+pandas==3.0.3 ; python_full_version >= '3.11'
+    # via seaborn
 pandocfilters==1.5.1
     # via nbconvert
 parso==0.8.7
@@ -319,8 +328,11 @@ python-dateutil==2.9.0.post0
     # via
     #   jupyter-client
     #   matplotlib
+    #   pandas
 python-discovery==1.4.0
     # via virtualenv
+pytz==2026.2 ; python_full_version < '3.11'
+    # via pandas
 pywin32-ctypes==0.2.3 ; platform_machine != 'ppc64le' and platform_machine != 's390x' and sys_platform == 'win32'
     # via keyring
 pyyaml==6.0.3
@@ -360,6 +372,7 @@ rpds-py==2026.5.1 ; python_full_version >= '3.11'
     #   jsonschema
     #   referencing
 ruff==0.15.16
+seaborn==0.13.2
 secretstorage==3.5.0 ; platform_machine != 'ppc64le' and platform_machine != 's390x' and sys_platform == 'linux'
     # via keyring
 setuptools==82.0.1 ; python_full_version >= '3.12'
@@ -446,6 +459,8 @@ typing-extensions==4.15.0
     #   sqlalchemy
     #   torch
     #   virtualenv
+tzdata==2026.2 ; python_full_version < '3.11' or sys_platform == 'emscripten' or sys_platform == 'win32'
+    # via pandas
 urllib3==2.7.0
     # via
     #   id

@@ -132,17 +132,25 @@ class TestPfaffianParlettReid:
             rtol=RTOL_APPROX_COMPARISON,
         )
 
-    def test_backward_finite_on_singular_matrix(self):
-        # Singular skew matrix (pf=0): the guarantee is that backward is FINITE (no LinAlgError),
-        # which pinv provides over inv. The returned zero is the analytic continuation, not the true
-        # derivative at this exactly-singular point, so we only assert finiteness here.
-        matrix = torch.zeros((4, 4), dtype=torch.float64)
-        matrix[2, 3] = 1.0
-        matrix[3, 2] = -1.0
-        matrix.requires_grad_(True)
-        PfaffianParlettReid.apply(matrix).backward()
-        assert matrix.grad is not None
-        assert torch.isfinite(matrix.grad).all()
+    def test_backward_exact_on_singular_matrix(self):
+        # At an exactly-singular skew input (pf=0) the gradient must be the TRUE derivative, via the
+        # Pfaffian adjugate. For the rank-2 matrix with only a_{23}=1, pf = a01*a23 - a02*a13 + a03*a12,
+        # so d pf / d a01 = a23 = 1 and the rest are 0.
+        parameters = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 1.0], dtype=torch.float64, requires_grad=True)
+        PfaffianParlettReid.apply(_skew_from_parameters(parameters, 4)).backward()
+        expected = torch.tensor([1.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float64)
+        torch.testing.assert_close(parameters.grad, expected, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
+
+    def test_backward_gradcheck_at_singular_point(self):
+        # gradcheck centered at an exactly-singular skew point (would fail with the inverse-only form).
+        parameters = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 1.0], dtype=torch.float64, requires_grad=True)
+        assert gradcheck(
+            lambda values: PfaffianParlettReid.apply(_skew_from_parameters(values, 4)),
+            (parameters,),
+            eps=1e-6,
+            atol=ATOL_APPROX_COMPARISON,
+            rtol=RTOL_APPROX_COMPARISON,
+        )
 
     def test_backward_returns_none_when_input_does_not_require_grad(self):
         matrix = _random_skew(4, _RNG)

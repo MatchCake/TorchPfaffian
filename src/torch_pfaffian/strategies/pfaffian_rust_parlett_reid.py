@@ -13,9 +13,10 @@ class RustPfaffianParlettReid(PfaffianStrategy):
     The forward moves the input to a contiguous CPU array and calls the compiled
     ``torch_pfaffian._rust`` kernel at a precision chosen from the input dtype: ``float32`` inputs
     use the single-precision kernel and every other floating dtype uses the double-precision kernel.
-    The result is cast back to the input dtype and device. The backward is the same closed form as
-    :class:`PfaffianParlettReid`, ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T``, computed in PyTorch.
-    CUDA inputs are evaluated on CPU for the forward; the backward inverse runs on the input device.
+    The result is cast back to the input dtype and device. The backward is the same as
+    :class:`PfaffianParlettReid` (the Pfaffian adjugate ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T``,
+    exact for invertible and singular inputs), computed in PyTorch. CUDA inputs are evaluated on CPU
+    for the forward; the backward runs on the input device.
 
     The input is a skew-symmetric matrix of shape ``(..., n, n)``.
     """
@@ -55,12 +56,6 @@ class RustPfaffianParlettReid(PfaffianStrategy):
         :rtype: torch.Tensor | None
         """
         matrix, pfaffian = cast("tuple[torch.Tensor, torch.Tensor]", ctx.saved_tensors)
-        grad_matrix = None
-        if ctx.needs_input_grad[0]:
-            # Use pinv, not inv: identical to inv for invertible A (exact gradient), but on a
-            # singular A it returns a finite 0 (since pf = 0) instead of raising. That 0 is the
-            # analytic continuation, not the true derivative at the exactly-singular point; such
-            # points are measure-zero and the forward there is also 0, so this is acceptable.
-            inverse = torch.linalg.pinv(matrix)
-            grad_matrix = torch.einsum("...,...ij->...ji", 0.5 * grad_output * pfaffian, inverse)
-        return grad_matrix
+        if not ctx.needs_input_grad[0]:
+            return None
+        return RustPfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)

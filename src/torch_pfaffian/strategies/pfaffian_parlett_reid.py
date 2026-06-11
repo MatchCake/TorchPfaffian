@@ -12,11 +12,10 @@ class PfaffianParlettReid(PfaffianStrategy):
     The forward performs a batched skew-tridiagonalization with partial pivoting: the batch is
     processed together and only the ``n / 2`` column-elimination steps are sequential. The result
     is the signed Pfaffian, unlike the determinant-based strategies which return only the magnitude.
-    The backward uses the closed form ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T`` via a single
-    pseudo-inverse, with no autograd graph over the elimination. It equals the inverse for invertible
-    inputs (the exact gradient) and returns a finite zero on singular inputs instead of raising. At an
-    exactly-singular input that zero is the analytic continuation, not the true derivative, but such
-    points are measure-zero.
+    The backward uses the closed form ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T`` via the Pfaffian
+    adjugate, with no autograd graph over the elimination. For invertible inputs this is a single
+    pseudo-inverse; for singular inputs (``pf == 0``) the adjugate is computed exactly from minor
+    Pfaffians, so the gradient is correct everywhere (see :meth:`PfaffianStrategy.pfaffian_grad_matrix`).
 
     The input is a skew-symmetric matrix of shape ``(..., 2n, 2n)``.
     """
@@ -90,12 +89,6 @@ class PfaffianParlettReid(PfaffianStrategy):
         :rtype: torch.Tensor | None
         """
         matrix, pfaffian = cast("tuple[torch.Tensor, torch.Tensor]", ctx.saved_tensors)
-        grad_matrix = None
-        if ctx.needs_input_grad[0]:
-            # Use pinv, not inv: identical to inv for invertible A (exact gradient), but on a
-            # singular A it returns a finite 0 (since pf = 0) instead of raising. That 0 is the
-            # analytic continuation, not the true derivative at the exactly-singular point; such
-            # points are measure-zero and the forward there is also 0, so this is acceptable.
-            inverse = torch.linalg.pinv(matrix)
-            grad_matrix = torch.einsum("...,...ij->...ji", 0.5 * grad_output * pfaffian, inverse)
-        return grad_matrix
+        if not ctx.needs_input_grad[0]:
+            return None
+        return PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)

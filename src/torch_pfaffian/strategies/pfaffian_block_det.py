@@ -53,3 +53,11 @@ class PfaffianBlockDet(PfaffianStrategy):
             grad_matrix = torch.zeros_like(matrix)
             grad_matrix[..., :n, n:] = grad_block
         return grad_matrix
+
+    @classmethod
+    def _pfaffian_adjugate(cls, matrices: torch.Tensor) -> torch.Tensor:
+        # This strategy's forward only accepts block-antidiagonal matrices, but the Pfaffian minors
+        # are general skew matrices, so the adjugate is computed with the general Parlett-Reid forward.
+        from .pfaffian_parlett_reid import PfaffianParlettReid
+
+        return PfaffianParlettReid._pfaffian_adjugate(matrices)

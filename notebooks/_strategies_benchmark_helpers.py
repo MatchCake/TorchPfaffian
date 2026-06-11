@@ -3,6 +3,8 @@ from collections.abc import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
 import torch
 from torch.profiler import ProfilerActivity, profile
 from tqdm.auto import tqdm
@@ -11,7 +13,7 @@ from torch_pfaffian.strategies.pfaffian_block_det import PfaffianBlockDet
 from torch_pfaffian.strategies.strategy import PfaffianStrategy
 
 Strategy = type[PfaffianStrategy]
-BenchmarkResults = dict[str, dict[str, list[float]]]
+BenchmarkResults = pd.DataFrame
 
 METRICS = ("forward_time", "backward_time", "forward_memory", "forward_backward_memory")
 
@@ -96,13 +98,6 @@ def _forward_backward_call(strategy: Strategy, matrix: torch.Tensor) -> torch.Te
     return grad_matrix
 
 
-def _confidence_interval(values: np.ndarray, confidence_z: float = 1.96) -> float:
-    # Half-width of the normal-approximation confidence interval for the mean.
-    if values.size < 2:
-        return 0.0
-    return float(confidence_z * values.std(ddof=1) / np.sqrt(values.size))
-
-
 def benchmark_strategies(
     strategies: list[Strategy],
     sizes_n: list[int],
@@ -110,12 +105,13 @@ def benchmark_strategies(
     device: str = "cpu",
     n_seeds: int = 20,
     n_repeats: int = 3,
-) -> BenchmarkResults:
+) -> pd.DataFrame:
     """
     Benchmark forward/backward time and memory of each strategy over several random seeds.
 
-    For each matrix dimension and strategy the metric is measured once per seed; the returned
-    values are the across-seed mean and the half-width of the 95% confidence interval.
+    Returns a tidy DataFrame with one row per (strategy, dimension, seed) combination and one
+    column per metric.  Pass it directly to :func:`plot_results` or use pandas/seaborn to
+    build custom views.
 
     :param strategies: The strategy classes to benchmark (each exposes ``NAME`` and ``apply``).
     :param sizes_n: Matrix dimensions to sweep (even integers); each yields ``n x n`` matrices.
@@ -123,27 +119,18 @@ def benchmark_strategies(
     :param device: Device on which to run the benchmark.
     :param n_seeds: Number of random seeds used to build the confidence intervals.
     :param n_repeats: Number of timed repeats per seed (the median is kept).
-    :return: A mapping ``strategy_name -> {"dimension", "<metric>_mean", "<metric>_ci"}``.
-    :rtype: dict
+    :return: A DataFrame with columns ``strategy``, ``dimension``, ``seed``, and one column per
+        metric in :data:`METRICS`.
+    :rtype: pandas.DataFrame
     """
     is_cuda = device == "cuda"
-    results: BenchmarkResults = {
-        strategy.NAME: {
-            "dimension": [],
-            **{f"{metric}_mean": [] for metric in METRICS},
-            **{f"{metric}_ci": [] for metric in METRICS},
-        }
-        for strategy in strategies
-    }
+    records = []
     p_bar = tqdm(total=len(sizes_n) * len(strategies) * n_seeds, desc="Benchmarking strategies")
     for n in sizes_n:
-        per_seed: dict[str, dict[str, list[float]]] = {
-            strategy.NAME: {metric: [] for metric in METRICS} for strategy in strategies
-        }
         for seed in range(n_seeds):
             torch.manual_seed(seed)
-            # PfaffianBlockDet only returns the true Pfaffian on block-antidiagonal inputs; every other
-            # strategy is valid on any skew matrix, so benchmark those on a general random skew matrix.
+            # PfaffianBlockDet only returns the true Pfaffian on block-antidiagonal inputs; every
+            # other strategy is valid on any skew matrix.
             block_matrix = make_block_antidiagonal(n, batch_size, dtype=torch.float32, device=device)
             random_matrix = make_random_skew(n, batch_size, dtype=torch.float32, device=device)
             for strategy in strategies:
@@ -151,32 +138,29 @@ def benchmark_strategies(
                 p_bar.set_description(f"Benchmarking {strategy.NAME:^30} (n: {n:^5} | seed: {seed:^5})")
                 forward_time = _median_time(lambda: _forward_call(strategy, matrix), is_cuda, n_repeats)
                 full_time = _median_time(lambda: _forward_backward_call(strategy, matrix), is_cuda, n_repeats)
-                record = per_seed[strategy.NAME]
-                record["forward_time"].append(forward_time)
-                record["backward_time"].append(max(full_time - forward_time, 0.0))
-                record["forward_memory"].append(_peak_memory(lambda: _forward_call(strategy, matrix), is_cuda))
-                record["forward_backward_memory"].append(
-                    _peak_memory(lambda: _forward_backward_call(strategy, matrix), is_cuda)
+                records.append(
+                    {
+                        "strategy": strategy.NAME,
+                        "dimension": n,
+                        "seed": seed,
+                        "forward_time": forward_time,
+                        "backward_time": max(full_time - forward_time, 0.0),
+                        "forward_memory": _peak_memory(lambda: _forward_call(strategy, matrix), is_cuda),
+                        "forward_backward_memory": _peak_memory(
+                            lambda: _forward_backward_call(strategy, matrix), is_cuda
+                        ),
+                    }
                 )
                 p_bar.update(1)
-
-        for strategy in strategies:
-            results[strategy.NAME]["dimension"].append(n)
-            for metric in METRICS:
-                values = np.asarray(per_seed[strategy.NAME][metric], dtype=float)
-                results[strategy.NAME][f"{metric}_mean"].append(float(values.mean()))
-                results[strategy.NAME][f"{metric}_ci"].append(_confidence_interval(values))
     p_bar.close()
-    return results
+    return pd.DataFrame(records)
 
 
-def plot_results(
-    results: BenchmarkResults, strategies: list[Strategy], batch_size: int, device: str = "cpu"
-) -> plt.Figure:
+def plot_results(results: pd.DataFrame, strategies: list[Strategy], batch_size: int, device: str = "cpu") -> plt.Figure:
     """
     Plot the benchmark results as a 2x2 grid of time and memory panels with 95% CI bands.
 
-    :param results: The mapping returned by :func:`benchmark_strategies`.
+    :param results: The DataFrame returned by :func:`benchmark_strategies`.
     :param strategies: The strategy classes that were benchmarked.
     :param batch_size: Batch size used for the benchmark (shown in the title).
     :param device: Device used for the benchmark (shown in the title and memory label).
@@ -191,23 +175,23 @@ def plot_results(
         ("forward_backward_memory", "Forward + backward memory", memory_label),
     ]
 
+    df_long = results.melt(
+        id_vars=["strategy", "dimension", "seed"],
+        value_vars=list(METRICS),
+        var_name="metric",
+        value_name="value",
+    )
+
     fig, axes = plt.subplots(2, 2, figsize=(12, 9))
-    for ax, (key, title, ylabel) in zip(axes.flat, panels):
-        for strategy in strategies:
-            record = results[strategy.NAME]
-            dimension = np.asarray(record["dimension"], dtype=float)
-            mean = np.asarray(record[f"{key}_mean"], dtype=float)
-            ci = np.asarray(record[f"{key}_ci"], dtype=float)
-            line = ax.plot(dimension, mean, marker="o", label=strategy.NAME)[0]
-            lower = np.clip(mean - ci, np.finfo(float).tiny, None)
-            ax.fill_between(dimension, lower, mean + ci, alpha=0.2, color=line.get_color())
+    for ax, (metric_key, title, ylabel) in zip(axes.flat, panels):
+        subset = df_long[df_long["metric"] == metric_key]
+        sns.lineplot(data=subset, x="dimension", y="value", hue="strategy", marker="o", ax=ax)
         ax.set_title(title)
         ax.set_xlabel("matrix dimension")
         ax.set_ylabel(ylabel)
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
         ax.grid(True, which="both", linestyle=":", alpha=0.5)
-        ax.legend()
 
     fig.suptitle(f"Pfaffian strategies benchmark (batch_size={batch_size}, device={device}, 95% CI over seeds)")
     fig.tight_layout()
