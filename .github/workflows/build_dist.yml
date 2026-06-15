@@ -56,7 +56,9 @@ jobs:
 
     - name: Build dist
       run: |
-        uv run python -m build --sdist --wheel --no-isolation --outdir dist/ .
+        rm -f dist/*.whl dist/*.tar.gz
+        uv run maturin build --release --out dist --compatibility manylinux2014 --zig
+        uv run maturin sdist --out dist
         uv run twine check dist/*
 
     - name: Commit updated pyproject.toml
