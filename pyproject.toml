@@ -1,6 +1,6 @@
 [project]
 name = "torchpfaffian"
-version = "0.0.2"
+version = "0.0.3"
 description = "PyTorch-based Pfaffian computation for skew-symmetric matrices."
 authors = [{ name = "Jérémie Gince", email = "gincejeremie@gmail.com" }]
 requires-python = ">=3.10,<3.15"
