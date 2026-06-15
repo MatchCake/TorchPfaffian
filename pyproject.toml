@@ -1,5 +1,5 @@
 [project]
-name = "TorchPfaffian"
+name = "torchpfaffian"
 version = "0.0.1"
 description = "PyTorch-based Pfaffian computation for skew-symmetric matrices."
 authors = [{ name = "Jérémie Gince", email = "gincejeremie@gmail.com" }]
