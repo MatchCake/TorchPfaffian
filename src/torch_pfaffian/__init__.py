@@ -13,7 +13,7 @@ __package__ = "torch_pfaffian"
 try:
     __version__ = importlib_metadata.version(__package__)
 except importlib_metadata.PackageNotFoundError:
-    __version__ = importlib_metadata.version("TorchPfaffian")
+    __version__ = importlib_metadata.version("torchpfaffian")
 
 import warnings
 from collections.abc import Callable
