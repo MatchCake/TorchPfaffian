@@ -475,5 +475,6 @@ webencodings==0.5.1
     #   bleach
     #   tinycss2
 wheel==0.45.1
+ziglang==0.16.0
 zipp==4.1.0
     # via importlib-metadata

@@ -60,6 +60,7 @@ dev = [
     "maturin>=1.0,<2",
     "tqdm>=4.68.2",
     "seaborn>=0.13.2",
+    "ziglang>=0.16.0",
 ]
 docs = [
     "wheel>=0.45,<0.46",
