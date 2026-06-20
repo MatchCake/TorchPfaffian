@@ -132,9 +132,7 @@ class TestPfaffianFDBPf:
         magnitude = PfaffianFDBPf.apply(matrix)
         magnitude.sum().backward()
         assert torch.isfinite(matrix.grad).all()
-        expected_invertible = torch.einsum(
-            "ij->ji", 0.5 * magnitude[1].detach() * torch.linalg.inv(invertible)
-        )
+        expected_invertible = torch.einsum("ij->ji", 0.5 * magnitude[1].detach() * torch.linalg.inv(invertible))
         torch.testing.assert_close(
             matrix.grad[1], expected_invertible, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
         )

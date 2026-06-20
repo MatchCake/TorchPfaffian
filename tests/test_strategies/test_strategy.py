@@ -72,9 +72,7 @@ class TestPfaffianStrategy:
         grad_output = torch.tensor([1.3, -0.7], dtype=torch.float64)
         result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
 
-        expected_invertible = torch.einsum(
-            "ij->ji", 0.5 * grad_output[1] * pfaffian[1] * torch.linalg.inv(invertible)
-        )
+        expected_invertible = torch.einsum("ij->ji", 0.5 * grad_output[1] * pfaffian[1] * torch.linalg.inv(invertible))
         minor_adjugate = PfaffianParlettReid._pfaffian_adjugate(singular[None])[0]
         expected_singular = torch.einsum("ij->ji", 0.5 * grad_output[0] * minor_adjugate)
         torch.testing.assert_close(
