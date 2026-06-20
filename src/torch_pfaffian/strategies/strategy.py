@@ -50,12 +50,15 @@ class PfaffianStrategy(torch.autograd.Function):
         """
         singular = pfaffian == 0
         dimension = matrix.shape[-1]
-        # inv (LU) raises on exactly-singular matrices, so the pf == 0 elements are replaced by the
-        # identity before the batched inverse; their adjugate is overwritten from minor Pfaffians below.
-        identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
-        safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
-        adjugate = pfaffian[..., None, None] * torch.linalg.inv(safe_matrix)  # pf(A) A^{-1}; 0 where pf == 0
-        if bool(singular.any()):
+        any_singular = bool(singular.any())
+        if any_singular:
+            identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+            safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
+            inverse = torch.linalg.inv(safe_matrix)
+        else:
+            inverse = torch.linalg.inv(matrix)
+        adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; 0 where pf == 0
+        if any_singular:
             flat_matrix = matrix.reshape(-1, dimension, dimension)
             flat_adjugate = adjugate.reshape(-1, dimension, dimension)
             singular_index = singular.reshape(-1).nonzero(as_tuple=True)[0]

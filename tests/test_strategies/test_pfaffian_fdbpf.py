@@ -101,3 +101,52 @@ class TestPfaffianFDBPf:
             needs_input_grad = (False,)
 
         assert PfaffianFDBPf.backward(_Context(), torch.ones_like(pfaffian)) is None
+
+    def test_backward_does_not_use_svd(self, monkeypatch):
+        # Regression: the magnitude gradient must not route through torch.linalg.pinv (SVD), whose
+        # iterative solver can fail to converge on ill-conditioned inputs. Force pinv to fail.
+        def _fail(*args, **kwargs):
+            raise AssertionError("torch.linalg.pinv (SVD) must not be used by PfaffianFDBPf.backward")
+
+        monkeypatch.setattr(torch.linalg, "pinv", _fail)
+        matrix = torch.tensor(_skew(_RNG.random((6, 6))), requires_grad=True)
+        PfaffianFDBPf.apply(matrix).backward()
+        assert torch.isfinite(matrix.grad).all()
+
+    def test_backward_odd_dimension_gradient_is_finite_zero(self):
+        # Odd-dimensional skew matrices are always singular (inv would raise / return garbage); the
+        # magnitude is 0 there, so the gradient must be exactly zero and finite, never NaN.
+        matrix = torch.tensor(_skew(_RNG.random((5, 5))), requires_grad=True)
+        PfaffianFDBPf.apply(matrix).backward()
+        assert torch.isfinite(matrix.grad).all()
+        torch.testing.assert_close(matrix.grad, torch.zeros_like(matrix))
+
+    def test_backward_mixed_singular_invertible_batch_matches_inverse(self):
+        # A batch mixing an exactly-singular element (pf at the floor) with an invertible one must not
+        # raise, and the invertible element's gradient must match the inverse-based closed form.
+        singular = torch.zeros(4, 4, dtype=torch.float64)
+        singular[2, 3] = 1.0
+        singular[3, 2] = -1.0
+        invertible = torch.tensor(_skew(_RNG.random((4, 4))))
+        matrix = torch.stack([singular, invertible]).requires_grad_(True)
+        magnitude = PfaffianFDBPf.apply(matrix)
+        magnitude.sum().backward()
+        assert torch.isfinite(matrix.grad).all()
+        expected_invertible = torch.einsum(
+            "ij->ji", 0.5 * magnitude[1].detach() * torch.linalg.inv(invertible)
+        )
+        torch.testing.assert_close(
+            matrix.grad[1], expected_invertible, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    def test_backward_ill_conditioned_is_finite_and_matches_inverse(self):
+        # Ill-conditioned invertible input (the regime where the SVD pseudo-inverse fails to converge):
+        # the LU inverse stays finite and the gradient matches the inverse closed form.
+        scales = torch.tensor([1e8, 1e-8, 1e6, 1e-6], dtype=torch.float64)
+        blocks = [torch.tensor([[0.0, scale], [-scale, 0.0]], dtype=torch.float64) for scale in scales]
+        matrix = torch.block_diag(*blocks).requires_grad_(True)
+        magnitude = PfaffianFDBPf.apply(matrix)
+        magnitude.backward()
+        expected = torch.einsum("ij->ji", 0.5 * magnitude.detach() * torch.linalg.inv(matrix.detach()))
+        assert torch.isfinite(matrix.grad).all()
+        torch.testing.assert_close(matrix.grad, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
