@@ -14,7 +14,7 @@ class PfaffianParlettReid(PfaffianStrategy):
     is the signed Pfaffian, unlike the determinant-based strategies which return only the magnitude.
     The backward uses the closed form ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T`` via the Pfaffian
     adjugate, with no autograd graph over the elimination. For invertible inputs this is a single
-    pseudo-inverse; for singular inputs (``pf == 0``) the adjugate is computed exactly from minor
+    inverse; for singular inputs (``pf == 0``) the adjugate is computed exactly from minor
     Pfaffians, so the gradient is correct everywhere (see :meth:`PfaffianStrategy.pfaffian_grad_matrix`).
 
     The input is a skew-symmetric matrix of shape ``(..., 2n, 2n)``.
