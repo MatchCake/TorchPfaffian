@@ -1,8 +1,11 @@
-use num_traits::Float;
+use half::f16;
+use num_complex::Complex;
+use num_traits::{One, Zero};
 use numpy::ndarray::{Array1, Array2, Axis};
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArray3};
+use numpy::{Complex32, Complex64, IntoPyArray, PyArray1, PyReadonlyArray3};
 use pyo3::prelude::*;
 use rayon::prelude::*;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 const PIVOT_EPSILON: f64 = 1e-30;
 
@@ -10,13 +13,65 @@ const PIVOT_EPSILON: f64 = 1e-30;
 /// batches run serially to avoid thread-pool overhead.
 const PARALLEL_BATCH_THRESHOLD: usize = 8;
 
+/// Magnitude used to rank pivots and to test for a numerically zero pivot.
+///
+/// For real scalars this is the absolute value; for complex scalars it is the modulus. The pivot
+/// choice and the singularity test only ever compare magnitudes, so the elimination itself stays
+/// generic over real and complex precisions while the algebra runs in the native (possibly complex)
+/// type.
+trait Magnitude {
+    fn magnitude(&self) -> f64;
+}
+
+impl Magnitude for f16 {
+    fn magnitude(&self) -> f64 {
+        self.to_f64().abs()
+    }
+}
+
+impl Magnitude for f32 {
+    fn magnitude(&self) -> f64 {
+        self.abs() as f64
+    }
+}
+
+impl Magnitude for f64 {
+    fn magnitude(&self) -> f64 {
+        self.abs()
+    }
+}
+
+impl Magnitude for Complex<f32> {
+    fn magnitude(&self) -> f64 {
+        self.norm() as f64
+    }
+}
+
+impl Magnitude for Complex<f64> {
+    fn magnitude(&self) -> f64 {
+        self.norm()
+    }
+}
+
 /// Signed Pfaffian of a single skew-symmetric matrix via Parlett-Reid elimination.
 ///
-/// Generic over the floating precision so the same algorithm serves ``f32`` and ``f64`` inputs.
-/// The matrix is copied into a flat row-major buffer so the hot rank-2 Schur update runs over a
+/// Generic over the scalar type so the same algorithm serves ``f32``/``f64`` and their complex
+/// counterparts: the arithmetic runs in the native type while pivoting compares magnitudes. The
+/// matrix is copied into a flat row-major buffer so the hot rank-2 Schur update runs over a
 /// contiguous row slice, which the compiler can auto-vectorize (far cheaper than per-element
 /// strided ndarray indexing).
-fn pfaffian_one<T: Float>(matrix: Array2<T>) -> T {
+fn pfaffian_one<T>(matrix: Array2<T>) -> T
+where
+    T: Copy
+        + Zero
+        + One
+        + Magnitude
+        + Neg<Output = T>
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>,
+{
     let dimension = matrix.nrows();
     if dimension % 2 == 1 {
         return T::zero();
@@ -25,21 +80,20 @@ fn pfaffian_one<T: Float>(matrix: Array2<T>) -> T {
         return T::one();
     }
     let mut data: Vec<T> = matrix.iter().copied().collect(); // row-major, len dimension * dimension
-    let epsilon = T::from(PIVOT_EPSILON).unwrap();
     let mut sign = T::one();
     let mut column = 0usize;
     while column + 2 < dimension {
-        // Partial pivoting: largest |data[row, column]| for row > column + 1.
+        // Partial pivoting: largest magnitude data[row, column] for row > column + 1.
         let mut pivot_row = column + 2;
-        let mut best = data[(column + 2) * dimension + column].abs();
+        let mut best = data[(column + 2) * dimension + column].magnitude();
         for row in (column + 3)..dimension {
-            let candidate = data[row * dimension + column].abs();
+            let candidate = data[row * dimension + column].magnitude();
             if candidate > best {
                 best = candidate;
                 pivot_row = row;
             }
         }
-        if best > data[(column + 1) * dimension + column].abs() {
+        if best > data[(column + 1) * dimension + column].magnitude() {
             // Congruence swap of rows then columns column+1 <-> pivot_row.
             for index in 0..dimension {
                 data.swap((column + 1) * dimension + index, pivot_row * dimension + index);
@@ -50,7 +104,7 @@ fn pfaffian_one<T: Float>(matrix: Array2<T>) -> T {
             sign = -sign;
         }
         let pivot = data[(column + 1) * dimension + column];
-        if pivot.abs() < epsilon {
+        if pivot.magnitude() < PIVOT_EPSILON {
             return T::zero();
         }
         // Rank-2 skew Schur-complement update on the trailing block, read from originals.
@@ -83,7 +137,20 @@ fn pfaffian_one<T: Float>(matrix: Array2<T>) -> T {
 ///
 /// The batch elements are independent, so they are mapped over rayon threads; the per-matrix
 /// Parlett-Reid elimination itself stays sequential. The caller releases the GIL around this.
-fn signed_pfaffian_owned<T: Float + Send + Sync>(matrices: Vec<Array2<T>>) -> Vec<T> {
+fn signed_pfaffian_owned<T>(matrices: Vec<Array2<T>>) -> Vec<T>
+where
+    T: Copy
+        + Zero
+        + One
+        + Magnitude
+        + Neg<Output = T>
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>
+        + Send
+        + Sync,
+{
     if matrices.len() >= PARALLEL_BATCH_THRESHOLD {
         matrices.into_par_iter().map(pfaffian_one).collect()
     } else {
@@ -92,7 +159,7 @@ fn signed_pfaffian_owned<T: Float + Send + Sync>(matrices: Vec<Array2<T>>) -> Ve
 }
 
 /// Copy each ``(n, n)`` slice of a ``(batch, n, n)`` view into an owned matrix.
-fn owned_matrices<T: Float + numpy::Element>(matrix: &PyReadonlyArray3<'_, T>) -> Vec<Array2<T>> {
+fn owned_matrices<T: numpy::Element + Clone>(matrix: &PyReadonlyArray3<'_, T>) -> Vec<Array2<T>> {
     let view = matrix.as_array();
     let batch = view.shape()[0];
     (0..batch).map(|index| view.index_axis(Axis(0), index).to_owned()).collect()
@@ -114,16 +181,54 @@ fn signed_pfaffian_f32<'py>(py: Python<'py>, matrix: PyReadonlyArray3<'py, f32>)
     Array1::from(results).into_pyarray(py)
 }
 
+/// Signed Pfaffian of a batch of ``float16`` skew-symmetric matrices, shape ``(batch, n, n)``.
+///
+/// The elimination runs entirely in half precision, so every intermediate is rounded to ``float16``.
+/// This is the least accurate kernel and can overflow the narrow ``float16`` range.
+#[pyfunction]
+fn signed_pfaffian_f16<'py>(py: Python<'py>, matrix: PyReadonlyArray3<'py, f16>) -> Bound<'py, PyArray1<f16>> {
+    let matrices = owned_matrices(&matrix);
+    let results = py.allow_threads(|| signed_pfaffian_owned(matrices));
+    Array1::from(results).into_pyarray(py)
+}
+
+/// Signed Pfaffian of a batch of ``complex128`` skew-symmetric matrices, shape ``(batch, n, n)``.
+#[pyfunction]
+fn signed_pfaffian_c128<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, Complex64>,
+) -> Bound<'py, PyArray1<Complex64>> {
+    let matrices = owned_matrices(&matrix);
+    let results = py.allow_threads(|| signed_pfaffian_owned(matrices));
+    Array1::from(results).into_pyarray(py)
+}
+
+/// Signed Pfaffian of a batch of ``complex64`` skew-symmetric matrices, shape ``(batch, n, n)``.
+#[pyfunction]
+fn signed_pfaffian_c64<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, Complex32>,
+) -> Bound<'py, PyArray1<Complex32>> {
+    let matrices = owned_matrices(&matrix);
+    let results = py.allow_threads(|| signed_pfaffian_owned(matrices));
+    Array1::from(results).into_pyarray(py)
+}
+
 #[pymodule]
 fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(signed_pfaffian_f64, module)?)?;
     module.add_function(wrap_pyfunction!(signed_pfaffian_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(signed_pfaffian_f16, module)?)?;
+    module.add_function(wrap_pyfunction!(signed_pfaffian_c128, module)?)?;
+    module.add_function(wrap_pyfunction!(signed_pfaffian_c64, module)?)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::pfaffian_one;
+    use half::f16;
+    use num_complex::Complex;
     use numpy::ndarray::array;
 
     #[test]
@@ -160,5 +265,64 @@ mod tests {
         assert_eq!(pfaffian_one(odd), 0.0);
         let empty = numpy::ndarray::Array2::<f64>::zeros((0, 0));
         assert_eq!(pfaffian_one(empty), 1.0);
+    }
+
+    #[test]
+    fn f16_four_by_four_matches_formula_within_half_precision() {
+        // Native half-precision elimination; pf = a*f - b*e + c*d, checked at f16 tolerance.
+        let value = |x: f64| f16::from_f64(x);
+        let (a, b, c, d, e, f) = (0.5, 0.25, 0.75, 0.125, 0.375, 0.625);
+        let zero = f16::from_f64(0.0);
+        let m = array![
+            [zero, value(a), value(b), value(c)],
+            [-value(a), zero, value(d), value(e)],
+            [-value(b), -value(d), zero, value(f)],
+            [-value(c), -value(e), -value(f), zero]
+        ];
+        let expected = a * f - b * e + c * d;
+        assert!((pfaffian_one(m).to_f64() - expected).abs() < 1e-2);
+    }
+
+    #[test]
+    fn complex_two_by_two_is_the_offdiagonal() {
+        // pf([[0, z], [-z, 0]]) = z for complex z.
+        let z = Complex::new(1.0_f64, 2.0);
+        let m = array![[Complex::new(0.0, 0.0), z], [-z, Complex::new(0.0, 0.0)]];
+        let result = pfaffian_one(m);
+        assert!((result - z).norm() < 1e-12);
+    }
+
+    #[test]
+    fn complex_four_by_four_matches_pfaffian_formula() {
+        // pf = a*f - b*e + c*d holds over the complex field as well.
+        let a = Complex::new(1.0_f64, -1.0);
+        let b = Complex::new(0.5, 2.0);
+        let c = Complex::new(-1.5, 0.25);
+        let d = Complex::new(2.0, 1.0);
+        let e = Complex::new(-0.5, -0.5);
+        let f = Complex::new(3.0, -2.0);
+        let zero = Complex::new(0.0, 0.0);
+        let m = array![
+            [zero, a, b, c],
+            [-a, zero, d, e],
+            [-b, -d, zero, f],
+            [-c, -e, -f, zero]
+        ];
+        let expected = a * f - b * e + c * d;
+        assert!((pfaffian_one(m) - expected).norm() < 1e-9);
+    }
+
+    #[test]
+    fn complex_singular_is_zero() {
+        // A complex skew matrix with a zero pivot column has Pfaffian 0.
+        let zero = Complex::new(0.0_f64, 0.0);
+        let z = Complex::new(1.0, 1.0);
+        let m = array![
+            [zero, zero, zero, zero],
+            [zero, zero, zero, zero],
+            [zero, zero, zero, z],
+            [zero, zero, -z, zero]
+        ];
+        assert!(pfaffian_one(m).norm() < 1e-12);
     }
 }

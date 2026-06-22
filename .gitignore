@@ -113,6 +113,7 @@ __pycache__/
 
 # C extensions
 *.so
+*.pdb
 
 # Distribution / packaging
 .Python

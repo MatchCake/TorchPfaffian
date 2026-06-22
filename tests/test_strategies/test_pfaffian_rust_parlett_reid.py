@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 import torch
@@ -35,6 +37,28 @@ def _random_skew(dimension: int, rng: np.random.Generator) -> torch.Tensor:
     upper = rng.random((dimension, dimension))
     skew = np.triu(upper, k=1)
     return torch.tensor(skew - skew.T)
+
+
+def _rand_skew_complex(dimension: int, rng: np.random.Generator) -> np.ndarray:
+    entries = rng.normal(size=(dimension, dimension)) + 1j * rng.normal(size=(dimension, dimension))
+    return entries - entries.T
+
+
+def _cofactor_pfaffian(matrix: np.ndarray) -> complex:
+    # Exact recursive cofactor expansion; ground-truth oracle for complex skew-symmetric inputs.
+    dimension = matrix.shape[0]
+    if dimension == 0:
+        return 1 + 0j
+    if dimension % 2:
+        return 0j
+    if dimension == 2:
+        return matrix[0, 1]
+    total = 0j
+    rest = list(range(1, dimension))
+    for position, column in enumerate(rest):
+        sub = [index for index in rest if index != column]
+        total += (-1) ** position * matrix[0, column] * _cofactor_pfaffian(matrix[np.ix_(sub, sub)])
+    return total
 
 
 def _skew_from_parameters(parameters: torch.Tensor, dimension: int) -> torch.Tensor:
@@ -164,6 +188,68 @@ class TestRustPfaffianParlettReid:
             atol=ATOL_APPROX_COMPARISON,
             rtol=RTOL_APPROX_COMPARISON,
         )
+
+    @pytest.mark.parametrize("dimension", [2, 4, 6, 8])
+    @pytest.mark.parametrize("dtype", [torch.complex64, torch.complex128])
+    def test_forward_complex_matches_cofactor_oracle(self, dimension, dtype):
+        rng = np.random.default_rng(TEST_SEED + dimension)
+        skew = _rand_skew_complex(dimension, rng)
+        matrix = torch.tensor(skew, dtype=dtype)
+        result = RustPfaffianParlettReid.apply(matrix)
+        assert result.dtype == dtype
+        atol = ATOL_SCALAR_COMPARISON if dtype == torch.complex128 else 1e-4
+        torch.testing.assert_close(result, torch.tensor(_cofactor_pfaffian(skew), dtype=dtype), atol=atol, rtol=atol)
+
+    def test_forward_complex_matches_python_parlett_reid(self):
+        rng = np.random.default_rng(TEST_SEED)
+        matrix = torch.tensor(_rand_skew_complex(6, rng), dtype=torch.complex128)
+        torch.testing.assert_close(
+            RustPfaffianParlettReid.apply(matrix),
+            PfaffianParlettReid.apply(matrix),
+            atol=ATOL_SCALAR_COMPARISON,
+            rtol=RTOL_SCALAR_COMPARISON,
+        )
+
+    def test_forward_complex_emits_no_imaginary_discard_warning(self):
+        rng = np.random.default_rng(TEST_SEED)
+        matrix = torch.tensor(_rand_skew_complex(6, rng), dtype=torch.complex128)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            RustPfaffianParlettReid.apply(matrix)
+        assert not any("imaginary part" in str(warning.message) for warning in caught)
+
+    @pytest.mark.parametrize("dimension", _GRADCHECK_DIMENSIONS)
+    def test_backward_complex_passes_gradcheck_on_skew_parameterization(self, dimension):
+        count = dimension * (dimension - 1) // 2
+        rng = np.random.default_rng(TEST_SEED + dimension)
+        values = rng.normal(size=count) + 1j * rng.normal(size=count)
+        parameters = torch.tensor(values, dtype=torch.complex128, requires_grad=True)
+        assert gradcheck(
+            lambda free: RustPfaffianParlettReid.apply(_skew_from_parameters(free, dimension)),
+            (parameters,),
+            eps=1e-6,
+            atol=ATOL_APPROX_COMPARISON,
+            rtol=RTOL_APPROX_COMPARISON,
+        )
+
+    def test_forward_float16_runs_natively_in_half_precision(self):
+        # float16 is computed by the native half-precision kernel (the caller opts into half-precision
+        # risk); the result agrees with the double-precision Pfaffian of the same f16 values at f16
+        # tolerance and preserves the float16 dtype.
+        half = _random_skew(4, _RNG).to(torch.float16)
+        result = RustPfaffianParlettReid.apply(half)
+        assert result.dtype == torch.float16
+        reference = RustPfaffianParlettReid.apply(half.to(torch.float64))
+        torch.testing.assert_close(
+            result.to(torch.float64), reference, atol=ATOL_APPROX_COMPARISON, rtol=RTOL_APPROX_COMPARISON
+        )
+
+    def test_forward_unsupported_dtype_raises_with_guidance(self):
+        # Unsupported dtypes must raise rather than be silently downcast; the message points at the
+        # pure-PyTorch fallback and the issue tracker.
+        matrix = torch.tensor([[0.0, 1.0], [-1.0, 0.0]]).to(torch.bfloat16)
+        with pytest.raises(TypeError, match="no Rust kernel for dtype.*PfaffianParlettReid.*issues"):
+            RustPfaffianParlettReid.apply(matrix)
 
     def test_backward_returns_none_when_input_does_not_require_grad(self):
         matrix = _random_skew(4, _RNG)

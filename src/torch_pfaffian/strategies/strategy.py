@@ -42,6 +42,11 @@ class PfaffianStrategy(torch.autograd.Function):
         ``pf == 0`` elements (whose inverse is discarded anyway) are replaced by the identity before the
         batched inverse so the call stays well-posed.
 
+        The Pfaffian is holomorphic in the entries of ``A``, so for complex inputs the backward returns
+        the conjugate of the analytic derivative, ``conj(d pf / d A) * grad_output``, which is PyTorch's
+        Wirtinger convention for complex autograd (``z.grad = d L / d conj(z)``). For real inputs the
+        conjugation is a no-op, so real gradients are unchanged.
+
         :param matrix: The saved input matrix of shape ``(..., n, n)``.
         :param pfaffian: The saved forward Pfaffian of shape ``(...,)``.
         :param grad_output: Gradient of the output with respect to the loss, of shape ``(...,)``.
@@ -66,7 +71,7 @@ class PfaffianStrategy(torch.autograd.Function):
                 singular_adjugate = cls._pfaffian_adjugate(flat_matrix.index_select(0, singular_index))
             flat_adjugate = flat_adjugate.index_copy(0, singular_index, singular_adjugate.to(flat_adjugate.dtype))
             adjugate = flat_adjugate.reshape_as(matrix)
-        return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate)
+        return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate.conj())
 
     @classmethod
     def _pfaffian_adjugate(cls, matrices: torch.Tensor) -> torch.Tensor:

@@ -11,17 +11,32 @@ class RustPfaffianParlettReid(PfaffianStrategy):
     Compute the signed Pfaffian with the Rust Parlett-Reid kernel.
 
     The forward moves the input to a contiguous CPU array and calls the compiled
-    ``torch_pfaffian._rust`` kernel at a precision chosen from the input dtype: ``float32`` inputs
-    use the single-precision kernel and every other floating dtype uses the double-precision kernel.
+    ``torch_pfaffian._rust`` kernel for the input dtype, each running natively at that precision:
+    ``float16``, ``float32``/``complex64`` and ``float64``/``complex128`` map to the half-, single-
+    and double-precision kernels. Half precision is the caller's explicit choice and carries its risk:
+    the elimination runs entirely in ``float16``, which is the least accurate kernel and can overflow
+    the narrow ``float16`` range to ``inf`` for larger or larger-scaled matrices (use ``float32`` for a
+    measurably more accurate result). Complex inputs are computed natively over the complex field (no
+    imaginary part is discarded), giving the correct complex signed Pfaffian. Any other dtype raises
+    :class:`TypeError`.
     The result is cast back to the input dtype and device. The backward is the same as
-    :class:`PfaffianParlettReid` (the Pfaffian adjugate ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T``,
-    exact for invertible and singular inputs), computed in PyTorch. CUDA inputs are evaluated on CPU
-    for the forward; the backward runs on the input device.
+    :class:`PfaffianParlettReid` (the Pfaffian adjugate
+    ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T``, exact for invertible and singular inputs and
+    conjugated for complex autograd), computed in PyTorch. CUDA inputs are evaluated on CPU for the
+    forward; the backward runs on the input device.
 
     The input is a skew-symmetric matrix of shape ``(..., n, n)``.
     """
 
     NAME = "RustPfaffianParlettReid"
+
+    _KERNEL_BY_DTYPE = {
+        torch.float16: ("signed_pfaffian_f16", torch.float16),
+        torch.float32: ("signed_pfaffian_f32", torch.float32),
+        torch.float64: ("signed_pfaffian_f64", torch.float64),
+        torch.complex64: ("signed_pfaffian_c64", torch.complex64),
+        torch.complex128: ("signed_pfaffian_c128", torch.complex128),
+    }
 
     @staticmethod
     def forward(matrix: torch.Tensor) -> torch.Tensor:
@@ -30,13 +45,17 @@ class RustPfaffianParlettReid(PfaffianStrategy):
             return torch.zeros(matrix.shape[:-2], dtype=matrix.dtype, device=matrix.device)
         if dimension == 0:
             return torch.ones(matrix.shape[:-2], dtype=matrix.dtype, device=matrix.device)
+        if matrix.dtype not in RustPfaffianParlettReid._KERNEL_BY_DTYPE:
+            supported = ", ".join(str(dtype) for dtype in RustPfaffianParlettReid._KERNEL_BY_DTYPE)
+            raise TypeError(
+                f"RustPfaffianParlettReid has no Rust kernel for dtype {matrix.dtype}; supported dtypes "
+                f"are {supported}. Cast the matrix to a supported dtype, or use the pure-PyTorch "
+                "PfaffianParlettReid strategy which handles any dtype. To request a Rust kernel for this "
+                "dtype, please open an issue at https://github.com/MatchCake/TorchPfaffian/issues."
+            )
         flat = matrix.reshape(-1, dimension, dimension)  # (batch, n, n)
-        if matrix.dtype == torch.float32:
-            working_dtype = torch.float32
-            kernel = _rust.signed_pfaffian_f32
-        else:
-            working_dtype = torch.float64
-            kernel = _rust.signed_pfaffian_f64
+        kernel_name, working_dtype = RustPfaffianParlettReid._KERNEL_BY_DTYPE[matrix.dtype]
+        kernel = getattr(_rust, kernel_name)
         array = flat.detach().to(working_dtype).cpu().contiguous().numpy()
         result = kernel(array)  # (batch,) in working_dtype
         pfaffian = torch.from_numpy(result).to(dtype=matrix.dtype, device=matrix.device)

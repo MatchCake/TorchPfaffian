@@ -54,8 +54,11 @@ def pfaffian(matrix: torch.Tensor, *, sign: bool = True, check_input: bool = Fal
     ``sign=False``, no grad               ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
     ===================================  ===========================  =========================================
 
-    The Rust kernel runs on CPU, so a non-CPU (e.g. CUDA) input is routed to ``PfaffianParlettReid``,
-    which runs natively on the input device and avoids a host round-trip.
+    The Rust kernel runs on CPU (in real and complex precisions), so a non-CPU (e.g. CUDA) input is
+    routed to ``PfaffianParlettReid``, which runs natively on the input device and avoids a host
+    round-trip. Both strategies compute the correct complex signed Pfaffian without discarding the
+    imaginary part and are differentiable end-to-end for real and complex inputs (the complex backward
+    follows PyTorch's Wirtinger convention).
 
     The Pfaffian is only defined for skew-symmetric matrices; the strategies assume this and do not
     check it. Pass ``check_input=True`` to validate the assumption. For large matrices the Pfaffian
