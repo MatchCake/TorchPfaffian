@@ -1,0 +1,16 @@
+.buildinfo
+genindex.html
+static
+torch_pfaffian.strategies.html
+searchindex.js
+py-modindex.html
+modules.html
+_images
+search.html
+index.html
+objects.inv
+sources
+.nojekyll
+readme.html
+torch_pfaffian.html
+notebooks
