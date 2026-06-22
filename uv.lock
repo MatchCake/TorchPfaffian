@@ -4560,7 +4560,7 @@ wheels = [
 
 [[package]]
 name = "torchpfaffian"
-version = "0.0.3"
+version = "0.0.4"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-13-torchpfaffian-cpu' and extra == 'extra-13-torchpfaffian-cu128') or (extra == 'extra-13-torchpfaffian-cpu' and extra == 'extra-13-torchpfaffian-cu130') or (extra == 'extra-13-torchpfaffian-cu128' and extra == 'extra-13-torchpfaffian-cu130')" },
