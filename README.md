@@ -11,6 +11,7 @@
 ![Dist Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/build_dist.yml/badge.svg)
 ![Doc Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/docs.yml/badge.svg)
 ![Coverage Badge Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/coverage_badge.yml/badge.svg)
+[![codecov](https://codecov.io/gh/MatchCake/TorchPfaffian/graph/badge.svg?token=Z1TK10CJUC)](https://codecov.io/gh/MatchCake/TorchPfaffian)
 
 
 # Description
