@@ -27,11 +27,25 @@ class PfaffianStrategy(torch.autograd.Function):
         Gradient of the signed Pfaffian with respect to the input matrix.
 
         Uses the closed form ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T`` via the Pfaffian adjugate
-        ``pf(A) A^{-1}``. For invertible inputs the adjugate is ``pf(A) * pinv(A)`` (a single inverse);
+        ``pf(A) A^{-1}``. For invertible inputs the adjugate is ``pf(A) * inv(A)`` (a single inverse);
         for singular inputs (``pf == 0``), where that product would be ``0`` and miss the true
         derivative, the adjugate is recomputed exactly from minor Pfaffians via
         :meth:`_pfaffian_adjugate` (using ``cls``'s own forward). The minor-based path runs only on the
         singular batch elements, so invertible inputs keep the single cheap inverse.
+
+        The inverse uses :func:`torch.linalg.inv` (an LU factorization) rather than
+        :func:`torch.linalg.pinv` (an SVD). A skew-symmetric ``A`` is invertible exactly when
+        ``pf(A) != 0`` (since ``det(A) = pf(A)^2``), so the inverse is only ever relied upon on the
+        invertible elements, where the LU factorization is the correct and robust tool. The SVD-based
+        pseudo-inverse can fail to converge on ill-conditioned or near-repeated-singular-value inputs,
+        which the LU factorization does not. Because ``inv`` raises on an exactly-singular matrix, the
+        ``pf == 0`` elements (whose inverse is discarded anyway) are replaced by the identity before the
+        batched inverse so the call stays well-posed.
+
+        The Pfaffian is holomorphic in the entries of ``A``, so for complex inputs the backward returns
+        the conjugate of the analytic derivative, ``conj(d pf / d A) * grad_output``, which is PyTorch's
+        Wirtinger convention for complex autograd (``z.grad = d L / d conj(z)``). For real inputs the
+        conjugation is a no-op, so real gradients are unchanged.
 
         :param matrix: The saved input matrix of shape ``(..., n, n)``.
         :param pfaffian: The saved forward Pfaffian of shape ``(...,)``.
@@ -39,10 +53,17 @@ class PfaffianStrategy(torch.autograd.Function):
         :return: Gradient of the input matrix, of shape ``(..., n, n)``.
         :rtype: torch.Tensor
         """
-        adjugate = pfaffian[..., None, None] * torch.linalg.pinv(matrix)  # pf(A) A^{-1}; 0 where pf == 0
         singular = pfaffian == 0
-        if bool(singular.any()):
-            dimension = matrix.shape[-1]
+        dimension = matrix.shape[-1]
+        any_singular = bool(singular.any())
+        if any_singular:
+            identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+            safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
+            inverse = torch.linalg.inv(safe_matrix)
+        else:
+            inverse = torch.linalg.inv(matrix)
+        adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; 0 where pf == 0
+        if any_singular:
             flat_matrix = matrix.reshape(-1, dimension, dimension)
             flat_adjugate = adjugate.reshape(-1, dimension, dimension)
             singular_index = singular.reshape(-1).nonzero(as_tuple=True)[0]
@@ -50,7 +71,7 @@ class PfaffianStrategy(torch.autograd.Function):
                 singular_adjugate = cls._pfaffian_adjugate(flat_matrix.index_select(0, singular_index))
             flat_adjugate = flat_adjugate.index_copy(0, singular_index, singular_adjugate.to(flat_adjugate.dtype))
             adjugate = flat_adjugate.reshape_as(matrix)
-        return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate)
+        return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate.conj())
 
     @classmethod
     def _pfaffian_adjugate(cls, matrices: torch.Tensor) -> torch.Tensor:

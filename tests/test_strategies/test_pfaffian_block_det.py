@@ -81,6 +81,56 @@ class TestPfaffianBlockDet:
 
         assert PfaffianBlockDet.backward(_Context(), torch.ones_like(pfaffian)) is None
 
+    @pytest.mark.parametrize("size", _BLOCK_SIZES)
+    def test_cofactor_matrix_matches_det_inverse_on_invertible(self, size):
+        # On invertible blocks the cofactor matrix must equal the classical adjugate transpose
+        # det(B) * (B^{-1})^T, the relation the singular gradient relies on.
+        blocks = torch.tensor(_RNG.random((4, size, size))) + torch.eye(size)
+        cofactor = PfaffianBlockDet._cofactor_matrix(blocks)
+        expected = torch.linalg.det(blocks)[..., None, None] * torch.linalg.inv(blocks).transpose(-1, -2)
+        torch.testing.assert_close(cofactor, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_backward_singular_block_is_finite_and_exact(self):
+        # A singular upper-right block (pf=0) used to crash the inverse-based backward. The gradient is
+        # c * adj(B)^T (finite, generally nonzero); verify it against an independent numpy cofactor.
+        block = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [1.0, 0.0, 5.0]])  # rows 0,1 dependent -> det 0
+        matrix = _block_antidiagonal(block).requires_grad_(True)
+        pfaffian = PfaffianBlockDet.apply(matrix)
+        assert pfaffian.item() == 0.0
+        pfaffian.backward()
+        assert torch.isfinite(matrix.grad).all()
+
+        size = block.shape[0]
+        constant = (-1) ** (size * (size - 1) // 2)
+        cofactor = np.array(
+            [
+                [(-1) ** (i + j) * np.linalg.det(np.delete(np.delete(block, i, 0), j, 1)) for j in range(size)]
+                for i in range(size)
+            ]
+        )
+        expected_block = torch.tensor(constant * cofactor)
+        torch.testing.assert_close(
+            matrix.grad[:size, size:], expected_block, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+        assert matrix.grad[:size, :size].abs().max() == 0  # gradient is confined to the upper-right block
+        assert matrix.grad[size:, :].abs().max() == 0
+
+    def test_backward_mixed_singular_invertible_batch_matches_inverse(self):
+        # A batch mixing a singular block with an invertible one must not raise, and the invertible
+        # element's gradient must match the inverse-based closed form.
+        singular_block = torch.zeros(3, 3, dtype=torch.float64)
+        invertible_block = torch.tensor(_RNG.random((3, 3))) + torch.eye(3)
+        matrix = torch.stack(
+            [_block_antidiagonal(singular_block), _block_antidiagonal(invertible_block)]
+        ).requires_grad_(True)
+        PfaffianBlockDet.apply(matrix).sum().backward()
+        assert torch.isfinite(matrix.grad).all()
+        constant = (-1) ** (3 * (3 - 1) // 2)
+        expected = constant * torch.linalg.det(invertible_block) * torch.linalg.inv(invertible_block).transpose(-1, -2)
+        torch.testing.assert_close(
+            matrix.grad[1, :3, 3:], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
     def test_adjugate_override_delegates_to_parlett_reid(self):
         # PfaffianBlockDet.forward is block-only, so its adjugate must defer to the general strategy.
         from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid

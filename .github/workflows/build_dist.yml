@@ -15,10 +15,42 @@ permissions:
   id-token: write
 
 jobs:
-  Build-Dist:
-    name: Build dist
+  Version:
+    name: Compute next version
     runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_tag }}
+    steps:
+    - uses: actions/checkout@v3
 
+    - name: Gather new package version
+      id: version
+      uses: anothrNick/github-tag-action@1.61.0
+      env:
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        WITH_V: false
+        DEFAULT_BUMP: patch
+        DRY_RUN: true
+
+  Build-Wheels:
+    name: Build wheel (${{ matrix.target }})
+    needs: Version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-13
+            target: macos-x86_64
+          - os: macos-14
+            target: macos-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python 3.11
@@ -37,29 +69,68 @@ jobs:
         uv venv .venv
         uv sync --locked --dev --extra cpu
 
-    - name: Gather new package version
-      id: version
-      uses: anothrNick/github-tag-action@1.61.0
-      env:
-        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
-        WITH_V: false
-        DEFAULT_BUMP: patch
-        DRY_RUN: true
-
-    - name: Bump package version in pyproject.toml
-      run: |
-        uv version ${{steps.version.outputs.new_tag}}
-        uv lock
+    - name: Stamp build version
+      run: uv version ${{ needs.Version.outputs.new_version }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Build dist
+    - name: Build manylinux wheel and sdist
+      if: matrix.target == 'linux'
       run: |
         rm -f dist/*.whl dist/*.tar.gz
         uv run maturin build --release --out dist --compatibility manylinux2014 --zig
         uv run maturin sdist --out dist
         uv run twine check dist/*
+
+    - name: Build native wheel
+      if: matrix.target != 'linux'
+      run: |
+        uv run maturin build --release --out dist
+        uv run twine check dist/*
+
+    - name: Upload distribution artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-${{ matrix.target }}
+        path: dist/*
+
+  Publish:
+    name: Release and publish
+    needs: [Version, Build-Wheels]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.11"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.9.2"
+        python-version: "3.11"
+        enable-cache: true
+    - name: Install dependencies
+      run: |
+        uv venv .venv
+        uv sync --locked --dev --extra cpu
+
+    - name: Download all distribution artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: dist
+        pattern: dist-*
+        merge-multiple: true
+
+    - name: Check distributions
+      run: uv run twine check dist/*
+
+    - name: Bump package version in pyproject.toml
+      run: |
+        uv version ${{ needs.Version.outputs.new_version }}
+        uv lock
 
     - name: Commit updated pyproject.toml
       run: |
