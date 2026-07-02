@@ -126,3 +126,63 @@ class TestPfaffianStrategy:
         expected = torch.einsum("ij->ji", 0.5 * grad_output * pfaffian * torch.linalg.inv(matrix))
         assert torch.isfinite(result).all()
         torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_grad_matrix_numerically_singular_real_does_not_raise(self):
+        # A rank-deficient skew matrix has a forward Pfaffian of
+        # round-off size, not exactly 0, so an exact ``pf == 0`` test routed it to the LU inverse,
+        # which raised on real inputs. The relative magnitude test must route it to the exact
+        # minor adjugate instead.
+        generator = torch.Generator().manual_seed(4)
+        first = torch.randn(6, dtype=torch.float64, generator=generator)
+        second = torch.randn(6, dtype=torch.float64, generator=generator)
+        matrix = torch.outer(first, second) - torch.outer(second, first)  # rank 2, pf = 0 exactly in math
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        assert pfaffian != 0.0  # round-off, the regression trigger
+        grad_output = torch.tensor(1.0, dtype=torch.float64)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
+        minor_adjugate = PfaffianParlettReid._pfaffian_adjugate(matrix[None])[0]
+        expected = torch.einsum("ij->ji", 0.5 * grad_output * minor_adjugate)
+        assert torch.isfinite(result).all()
+        torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_grad_matrix_numerically_singular_complex_is_exact(self):
+        # On complex inputs the LU inverse of a
+        # numerically singular matrix returns garbage without raising, so the old exact
+        # ``pf == 0`` test produced an O(1)-wrong gradient silently.
+        generator = torch.Generator().manual_seed(5)
+        first = torch.randn(6, dtype=torch.float64, generator=generator) + 1j * torch.randn(
+            6, dtype=torch.float64, generator=generator
+        )
+        second = torch.randn(6, dtype=torch.float64, generator=generator) + 1j * torch.randn(
+            6, dtype=torch.float64, generator=generator
+        )
+        matrix = torch.outer(first, second) - torch.outer(second, first)  # rank 2, pf = 0 exactly in math
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        grad_output = torch.tensor(1.0 + 0.0j, dtype=torch.complex128)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
+        minor_adjugate = PfaffianParlettReid._pfaffian_adjugate(matrix[None])[0]
+        expected = torch.einsum("ij->ji", 0.5 * grad_output * minor_adjugate.conj())
+        assert torch.isfinite(result.real).all() and torch.isfinite(result.imag).all()
+        torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_grad_matrix_residual_check_catches_moderate_pfaffian_ill_conditioning(self):
+        # One tiny and several unit singular-value pairs: the Pfaffian magnitude (1e-10) passes the
+        # relative magnitude test, but the LU inverse is too inaccurate (condition number ~1e10);
+        # the residual check must route the element to the exact minor adjugate.
+        scales = torch.tensor([1e-10, 1.0, 1.0, 1.0], dtype=torch.float64)
+        blocks = [torch.tensor([[0.0, scale], [-scale, 0.0]], dtype=torch.float64) for scale in scales]
+        generator = torch.Generator().manual_seed(6)
+        random_full = torch.randn(8, 8, dtype=torch.float64, generator=generator)
+        rotation, _ = torch.linalg.qr(random_full)
+        matrix = rotation.transpose(-1, -2) @ torch.block_diag(*blocks) @ rotation
+        matrix = 0.5 * (matrix - matrix.transpose(-1, -2))
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        grad_output = torch.tensor(1.0, dtype=torch.float64)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
+        minor_adjugate = PfaffianParlettReid._pfaffian_adjugate(matrix[None])[0]
+        expected = torch.einsum("ij->ji", 0.5 * grad_output * minor_adjugate)
+        torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_class_singularity_constants(self):
+        assert PfaffianStrategy.SINGULARITY_RTOL_EXPONENT == 0.75
+        assert PfaffianStrategy.INVERSE_RESIDUAL_RTOL_EXPONENT == 0.5
