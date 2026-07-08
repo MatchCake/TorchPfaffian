@@ -183,6 +183,82 @@ class TestPfaffianStrategy:
         expected = torch.einsum("ij->ji", 0.5 * grad_output * minor_adjugate)
         torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
 
+    def test_grad_matrix_lu_singular_above_magnitude_threshold_does_not_raise(self):
+        # Regression for the backward core dump: a matrix that is exactly singular to the LU
+        # factorization (a zero pivot) can carry a forward Pfaffian whose magnitude sits *above* the
+        # relative magnitude threshold (the forward's round-off for a singular matrix can exceed
+        # eps^0.75 * scale^(n/2)), so the magnitude test never flags it. It then reached the raising
+        # torch.linalg.inv and, inside autograd backward, aborted the process. The LU info from
+        # torch.linalg.inv_ex must flag it and route it to the exact minor adjugate.
+        singular = torch.zeros(4, 4, dtype=torch.float64)
+        singular[2, 3] = 1.0
+        singular[3, 2] = -1.0  # rank 2, exactly singular, true pf = 0
+        entry_scale = singular.abs().amax()
+        threshold = (
+            entry_scale ** (4 // 2) * torch.finfo(torch.float64).eps ** PfaffianStrategy.SINGULARITY_RTOL_EXPONENT
+        )
+        above_threshold_pfaffian = torch.tensor(0.5, dtype=torch.float64)
+        assert above_threshold_pfaffian.abs() > threshold  # not caught by the magnitude test
+        grad_output = torch.tensor(1.0, dtype=torch.float64)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(singular, above_threshold_pfaffian, grad_output)
+        minor_adjugate = PfaffianParlettReid._pfaffian_adjugate(singular[None])[0]
+        expected = torch.einsum("ij->ji", 0.5 * grad_output * minor_adjugate)
+        assert torch.isfinite(result).all()
+        torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_grad_matrix_lu_singular_complex_above_threshold_is_finite_and_exact(self):
+        # The complex counterpart: torch.linalg.inv returns garbage (no raise) for a numerically
+        # singular complex matrix above the magnitude threshold, silently corrupting the gradient.
+        # The LU info flag must route it to the exact minor adjugate instead.
+        singular = torch.zeros(4, 4, dtype=torch.complex128)
+        singular[2, 3] = 1.0 + 0.0j
+        singular[3, 2] = -1.0 + 0.0j  # rank 2, exactly singular, true pf = 0
+        above_threshold_pfaffian = torch.tensor(0.5 + 0.0j, dtype=torch.complex128)
+        grad_output = torch.tensor(1.0 + 0.0j, dtype=torch.complex128)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(singular, above_threshold_pfaffian, grad_output)
+        minor_adjugate = PfaffianParlettReid._pfaffian_adjugate(singular[None])[0]
+        expected = torch.einsum("ij->ji", 0.5 * grad_output * minor_adjugate.conj())
+        assert torch.isfinite(result.real).all() and torch.isfinite(result.imag).all()
+        torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_grad_matrix_mixed_lu_singular_batch_matches_closed_forms(self):
+        # A batch mixing an LU-singular element (above the magnitude threshold) with an invertible
+        # element: the batched torch.linalg.inv_ex must not raise, and each element must match its
+        # exact closed form. Guards against inf/nan from the singular element's discarded inverse
+        # leaking into the invertible element's gradient.
+        singular = torch.zeros(4, 4, dtype=torch.float64)
+        singular[2, 3] = 1.0
+        singular[3, 2] = -1.0
+        invertible = _random_skew(4, seed=7)
+        matrix = torch.stack([singular, invertible])
+        invertible_pfaffian = PfaffianParlettReid.forward(invertible)
+        pfaffian = torch.stack([torch.tensor(0.5, dtype=torch.float64), invertible_pfaffian])
+        grad_output = torch.tensor([1.3, -0.7], dtype=torch.float64)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
+        expected_invertible = torch.einsum(
+            "ij->ji", 0.5 * grad_output[1] * invertible_pfaffian * torch.linalg.inv(invertible)
+        )
+        minor_adjugate = PfaffianParlettReid._pfaffian_adjugate(singular[None])[0]
+        expected_singular = torch.einsum("ij->ji", 0.5 * grad_output[0] * minor_adjugate)
+        assert torch.isfinite(result).all()
+        torch.testing.assert_close(
+            result[1], expected_invertible, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+        torch.testing.assert_close(
+            result[0], expected_singular, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    def test_grad_matrix_empty_matrix_returns_empty_gradient(self):
+        # A 0x0 matrix has the constant Pfaffian 1, so the forward supports dimension == 0. The
+        # backward must return the empty (..., 0, 0) gradient instead of raising on the zero-size
+        # amax reduction used by the singularity criteria.
+        matrix = torch.zeros(1, 0, 0, dtype=torch.float64)
+        pfaffian = torch.ones(1, dtype=torch.float64)
+        grad_output = torch.ones(1, dtype=torch.float64)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
+        assert result.shape == matrix.shape
+        assert result.dtype == matrix.dtype
+
     def test_class_singularity_constants(self):
         assert PfaffianStrategy.SINGULARITY_RTOL_EXPONENT == 0.75
         assert PfaffianStrategy.INVERSE_RESIDUAL_RTOL_EXPONENT == 0.5

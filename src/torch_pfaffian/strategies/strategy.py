@@ -41,25 +41,29 @@ class PfaffianStrategy(torch.autograd.Function):
         :meth:`_pfaffian_adjugate` (using ``cls``'s own forward). The minor-based path runs only on
         the flagged batch elements, so well-conditioned inputs keep the single cheap inverse.
 
-        An element is flagged singular by two dtype-adaptive criteria (see the class constants):
+        An element is flagged singular by three dtype-adaptive criteria (see the class constants):
         the relative magnitude test ``|pf| <= eps^0.75 * scale^(n/2)`` with ``scale`` the largest
         entry magnitude (an exactly-singular matrix has a forward Pfaffian of round-off size, never
         exactly ``0``, so an exact ``pf == 0`` test would route it to the LU inverse, which raises
-        on real inputs and silently returns garbage on complex inputs), and a residual check
-        ``||A A^{-1} - I||_max > eps^0.5`` that catches ill-conditioned elements whose Pfaffian is
-        not small (for example one tiny and one huge singular-value pair). The magnitude test is
-        evaluated in log space so ``scale^(n/2)`` cannot overflow. Both tests only ever move
-        elements to the exact minor-based path, so flagging a well-conditioned element costs speed,
-        never accuracy.
+        on real inputs and silently returns garbage on complex inputs), the LU ``info`` returned by
+        :func:`torch.linalg.inv_ex` (``info != 0`` marks the elements the LU backend reports as
+        singular, catching a matrix the magnitude proxy missed because its forward round-off Pfaffian
+        exceeded ``eps^0.75 * scale^(n/2)``), and a residual check ``||A A^{-1} - I||_max > eps^0.5``
+        that catches ill-conditioned elements whose Pfaffian is not small (for example one tiny and
+        one huge singular-value pair). The magnitude test is evaluated in log space so ``scale^(n/2)``
+        cannot overflow. All three tests only ever move elements to the exact minor-based path, so
+        flagging a well-conditioned element costs speed, never accuracy.
 
-        The inverse uses :func:`torch.linalg.inv` (an LU factorization) rather than
+        The inverse uses :func:`torch.linalg.inv_ex` (an LU factorization) rather than
         :func:`torch.linalg.pinv` (an SVD). A skew-symmetric ``A`` is invertible exactly when
         ``pf(A) != 0`` (since ``det(A) = pf(A)^2``), so the inverse is only ever relied upon on the
         invertible elements, where the LU factorization is the correct and robust tool. The SVD-based
         pseudo-inverse can fail to converge on ill-conditioned or near-repeated-singular-value inputs,
-        which the LU factorization does not. Because ``inv`` raises on an exactly-singular matrix, the
-        flagged elements (whose inverse is discarded anyway) are replaced by the identity before the
-        batched inverse so the call stays well-posed.
+        which the LU factorization does not. The flagged elements (whose inverse is discarded anyway)
+        are replaced by the identity before the batched inverse to keep it well-conditioned, and
+        :func:`torch.linalg.inv_ex` returns an ``info`` code instead of raising, so a singular element
+        the magnitude test missed is reported through ``info`` rather than aborting the process from
+        inside autograd backward.
 
         The Pfaffian is holomorphic in the entries of ``A``, so for complex inputs the backward returns
         the conjugate of the analytic derivative, ``conj(d pf / d A) * grad_output``, which is PyTorch's
@@ -73,14 +77,17 @@ class PfaffianStrategy(torch.autograd.Function):
         :rtype: torch.Tensor
         """
         dimension = matrix.shape[-1]
+        if dimension == 0:
+            return torch.zeros_like(matrix)  # pf of a 0x0 matrix is the constant 1; the gradient is empty
         epsilon = torch.finfo(matrix.dtype).eps
         entry_scale = matrix.abs().amax(dim=(-2, -1))  # (...,)
         log_threshold = (dimension // 2) * torch.log(entry_scale) + cls.SINGULARITY_RTOL_EXPONENT * math.log(epsilon)
         singular = (entry_scale == 0) | (torch.log(pfaffian.abs()) <= log_threshold)  # log(0) = -inf is covered
         identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
         safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
-        inverse = torch.linalg.inv(safe_matrix)
-        residual = (safe_matrix @ inverse - identity).abs().amax(dim=(-2, -1))  # (...,)
+        inverse, info = torch.linalg.inv_ex(safe_matrix)  # non-raising; info != 0 marks LU-singular elements
+        singular = singular | (info != 0)  # exactly the elements the LU backend cannot invert
+        residual = (safe_matrix @ inverse - identity).abs().amax(dim=(-2, -1))  # (...,); nan on LU-singular
         singular = singular | (residual > epsilon**cls.INVERSE_RESIDUAL_RTOL_EXPONENT)
         adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; discarded where singular
         if bool(singular.any()):
