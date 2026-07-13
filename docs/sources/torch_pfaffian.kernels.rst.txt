@@ -1,0 +1,37 @@
+torch\_pfaffian.kernels package
+===============================
+
+Submodules
+----------
+
+torch\_pfaffian.kernels.det\_magnitude module
+---------------------------------------------
+
+.. automodule:: torch_pfaffian.kernels.det_magnitude
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.kernels.parlett\_reid\_slog module
+--------------------------------------------------
+
+.. automodule:: torch_pfaffian.kernels.parlett_reid_slog
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.kernels.small\_n module
+---------------------------------------
+
+.. automodule:: torch_pfaffian.kernels.small_n
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: torch_pfaffian.kernels
+   :members:
+   :undoc-members:
+   :show-inheritance:
