@@ -1,10 +1,8 @@
-.. <PackageName> documentation master file, created by
-   sphinx-quickstart on Thu Sep  1 13:05:39 2022.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+.. TorchPfaffian documentation master file.
+   It should contain the root `toctree` directive that ties the pages together.
 
-Welcome to <PackageName>'s documentation!
-======================================
+Welcome to TorchPfaffian's documentation!
+=========================================
 
 .. toctree::
     :maxdepth: 4
@@ -16,7 +14,7 @@ Welcome to <PackageName>'s documentation!
    :maxdepth: 4
    :caption: Tutorials:
 
-   notebooks/strategies_benchmark
+   notebooks/tutorial
 
 .. toctree::
    :maxdepth: 4

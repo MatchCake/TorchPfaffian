@@ -1,9 +1,22 @@
+import math
+
 import torch
 
 
 class PfaffianStrategy(torch.autograd.Function):
     EPSILON = 1e-30
     NAME = "PfaffianStrategy"
+    # When True (default) the singular-element gradient is the exact minor-based Pfaffian adjugate,
+    # which preserves the historical behavior at the cost of one host synchronization per backward.
+    # When False the backward is fully sync-free: singular elements (pf == 0) get an exactly zero
+    # gradient via torch.where, so no .any()/.item() branch and no minor loop run.
+    EXACT_SINGULAR_GRAD = True
+    # A batch element is routed to the exact minor-based adjugate when |pf| <= eps^0.75 * scale^(n/2)
+    # (relative to the entry scale, since pf is a degree-n/2 polynomial in the entries), or when the
+    # LU inverse fails its residual check ||A A^{-1} - I||_max > eps^0.5. Exponents of the dtype eps
+    # keep both criteria dtype-adaptive (float64: ~1e-12 and ~1.5e-8; float32: ~6e-6 and ~3e-4).
+    SINGULARITY_RTOL_EXPONENT = 0.75
+    INVERSE_RESIDUAL_RTOL_EXPONENT = 0.5
 
     @staticmethod
     def setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output):
@@ -27,25 +40,45 @@ class PfaffianStrategy(torch.autograd.Function):
         Gradient of the signed Pfaffian with respect to the input matrix.
 
         Uses the closed form ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T`` via the Pfaffian adjugate
-        ``pf(A) A^{-1}``. For invertible inputs the adjugate is ``pf(A) * inv(A)`` (a single inverse);
-        for singular inputs (``pf == 0``), where that product would be ``0`` and miss the true
-        derivative, the adjugate is recomputed exactly from minor Pfaffians via
-        :meth:`_pfaffian_adjugate` (using ``cls``'s own forward). The minor-based path runs only on the
-        singular batch elements, so invertible inputs keep the single cheap inverse.
+        ``pf(A) A^{-1}``. For well-conditioned inputs the adjugate is ``pf(A) * inv(A)`` (a single
+        inverse); for (numerically) singular inputs, where that product would be inaccurate or
+        garbage, the adjugate is recomputed exactly from minor Pfaffians via
+        :meth:`_pfaffian_adjugate` (using ``cls``'s own forward). The minor-based path runs only on
+        the flagged batch elements, so well-conditioned inputs keep the single cheap inverse.
 
-        The inverse uses :func:`torch.linalg.inv` (an LU factorization) rather than
+        An element is flagged singular by three dtype-adaptive criteria (see the class constants):
+        the relative magnitude test ``|pf| <= eps^0.75 * scale^(n/2)`` with ``scale`` the largest
+        entry magnitude (an exactly-singular matrix has a forward Pfaffian of round-off size, never
+        exactly ``0``, so an exact ``pf == 0`` test would route it to the LU inverse, which raises
+        on real inputs and silently returns garbage on complex inputs), the LU ``info`` returned by
+        :func:`torch.linalg.inv_ex` (``info != 0`` marks the elements the LU backend reports as
+        singular, catching a matrix the magnitude proxy missed because its forward round-off Pfaffian
+        exceeded ``eps^0.75 * scale^(n/2)``), and a residual check ``||A A^{-1} - I||_max > eps^0.5``
+        that catches ill-conditioned elements whose Pfaffian is not small (for example one tiny and
+        one huge singular-value pair). The magnitude test is evaluated in log space so ``scale^(n/2)``
+        cannot overflow. All three tests only ever move elements to the exact minor-based path, so
+        flagging a well-conditioned element costs speed, never accuracy.
+
+        The inverse uses :func:`torch.linalg.inv_ex` (an LU factorization) rather than
         :func:`torch.linalg.pinv` (an SVD). A skew-symmetric ``A`` is invertible exactly when
         ``pf(A) != 0`` (since ``det(A) = pf(A)^2``), so the inverse is only ever relied upon on the
         invertible elements, where the LU factorization is the correct and robust tool. The SVD-based
         pseudo-inverse can fail to converge on ill-conditioned or near-repeated-singular-value inputs,
-        which the LU factorization does not. Because ``inv`` raises on an exactly-singular matrix, the
-        ``pf == 0`` elements (whose inverse is discarded anyway) are replaced by the identity before the
-        batched inverse so the call stays well-posed.
+        which the LU factorization does not. The flagged elements (whose inverse is discarded anyway)
+        are replaced by the identity before the batched inverse to keep it well-conditioned, and
+        :func:`torch.linalg.inv_ex` returns an ``info`` code instead of raising, so a singular element
+        the magnitude test missed is reported through ``info`` rather than aborting the process from
+        inside autograd backward.
 
         The Pfaffian is holomorphic in the entries of ``A``, so for complex inputs the backward returns
         the conjugate of the analytic derivative, ``conj(d pf / d A) * grad_output``, which is PyTorch's
         Wirtinger convention for complex autograd (``z.grad = d L / d conj(z)``). For real inputs the
         conjugation is a no-op, so real gradients are unchanged.
+
+        All of the above assumes :attr:`EXACT_SINGULAR_GRAD` is ``True`` (the default). When it is
+        ``False`` the backward takes a fully host-synchronization-free path: singular elements
+        (``pf == 0``) receive an exactly zero gradient (the true Pfaffian-adjugate derivative there is
+        nonzero only at corank exactly 2), skipping the ``.any()`` branch and the minor loop entirely.
 
         :param matrix: The saved input matrix of shape ``(..., n, n)``.
         :param pfaffian: The saved forward Pfaffian of shape ``(...,)``.
@@ -53,17 +86,30 @@ class PfaffianStrategy(torch.autograd.Function):
         :return: Gradient of the input matrix, of shape ``(..., n, n)``.
         :rtype: torch.Tensor
         """
-        singular = pfaffian == 0
         dimension = matrix.shape[-1]
-        any_singular = bool(singular.any())
-        if any_singular:
+        if dimension == 0:
+            return torch.zeros_like(matrix)  # pf of a 0x0 matrix is the constant 1; the gradient is empty
+        if not cls.EXACT_SINGULAR_GRAD:
+            # Sync-free path: singular elements (pf == 0) get an exactly zero gradient (multiplying the
+            # inverse by pf zeroes it there), so no host branch and no minor loop are needed.
+            singular = pfaffian == 0
             identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
             safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
-            inverse = torch.linalg.inv(safe_matrix)
-        else:
-            inverse = torch.linalg.inv(matrix)
-        adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; 0 where pf == 0
-        if any_singular:
+            inverse, _ = torch.linalg.inv_ex(safe_matrix)  # non-raising; discarded where singular
+            adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; exactly zero where pf == 0
+            return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate.conj())
+        epsilon = torch.finfo(matrix.dtype).eps
+        entry_scale = matrix.abs().amax(dim=(-2, -1))  # (...,)
+        log_threshold = (dimension // 2) * torch.log(entry_scale) + cls.SINGULARITY_RTOL_EXPONENT * math.log(epsilon)
+        singular = (entry_scale == 0) | (torch.log(pfaffian.abs()) <= log_threshold)  # log(0) = -inf is covered
+        identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+        safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
+        inverse, info = torch.linalg.inv_ex(safe_matrix)  # non-raising; info != 0 marks LU-singular elements
+        singular = singular | (info != 0)  # exactly the elements the LU backend cannot invert
+        residual = (safe_matrix @ inverse - identity).abs().amax(dim=(-2, -1))  # (...,); nan on LU-singular
+        singular = singular | (residual > epsilon**cls.INVERSE_RESIDUAL_RTOL_EXPONENT)
+        adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; discarded where singular
+        if bool(singular.any()):
             flat_matrix = matrix.reshape(-1, dimension, dimension)
             flat_adjugate = adjugate.reshape(-1, dimension, dimension)
             singular_index = singular.reshape(-1).nonzero(as_tuple=True)[0]

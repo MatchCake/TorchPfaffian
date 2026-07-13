@@ -53,14 +53,49 @@ impl Magnitude for Complex<f64> {
     }
 }
 
-/// Signed Pfaffian of a single skew-symmetric matrix via Parlett-Reid elimination.
+/// Unit-modulus phase ``self / |self|`` of a nonzero scalar, staying in the native type.
+///
+/// For real scalars this is the sign (``+-1``); for complex scalars it is the unit phasor. Used only
+/// by the log-domain (slog) kernel, so it is implemented for the four precisions that expose a slog
+/// entry point (not ``f16``). Callers guard against a zero magnitude before dividing.
+trait SlogScalar: Magnitude {
+    fn unit_phase(self) -> Self;
+}
+
+impl SlogScalar for f32 {
+    fn unit_phase(self) -> f32 {
+        self / self.abs()
+    }
+}
+
+impl SlogScalar for f64 {
+    fn unit_phase(self) -> f64 {
+        self / self.abs()
+    }
+}
+
+impl SlogScalar for Complex<f32> {
+    fn unit_phase(self) -> Complex<f32> {
+        self / self.norm()
+    }
+}
+
+impl SlogScalar for Complex<f64> {
+    fn unit_phase(self) -> Complex<f64> {
+        self / self.norm()
+    }
+}
+
+/// Signed Pfaffian of a single skew-symmetric matrix held as a flat row-major buffer.
 ///
 /// Generic over the scalar type so the same algorithm serves ``f32``/``f64`` and their complex
-/// counterparts: the arithmetic runs in the native type while pivoting compares magnitudes. The
-/// matrix is copied into a flat row-major buffer so the hot rank-2 Schur update runs over a
-/// contiguous row slice, which the compiler can auto-vectorize (far cheaper than per-element
-/// strided ndarray indexing).
-fn pfaffian_one<T>(matrix: Array2<T>) -> T
+/// counterparts: the arithmetic runs in the native type while pivoting compares magnitudes. Working
+/// on a flat ``Vec`` (indexed ``data[row * dimension + col]``) keeps the hot rank-2 Schur update over
+/// a contiguous row slice, which the compiler can auto-vectorize. The caller owns the buffer, so this
+/// runs under ``py.allow_threads`` with no borrow of Python-managed data. A pivot column whose
+/// magnitude falls below ``PIVOT_EPSILON`` yields ``0`` (the historical linear-domain threshold; the
+/// slog kernel uses an exact-zero test instead).
+fn pfaffian_from_flat<T>(mut data: Vec<T>, dimension: usize) -> T
 where
     T: Copy
         + Zero
@@ -72,14 +107,12 @@ where
         + Mul<Output = T>
         + Div<Output = T>,
 {
-    let dimension = matrix.nrows();
     if dimension % 2 == 1 {
         return T::zero();
     }
     if dimension == 0 {
         return T::one();
     }
-    let mut data: Vec<T> = matrix.iter().copied().collect(); // row-major, len dimension * dimension
     let mut sign = T::one();
     let mut column = 0usize;
     while column + 2 < dimension {
@@ -133,10 +166,129 @@ where
     pfaffian
 }
 
-/// Signed Pfaffian of each owned matrix, computed in parallel across the batch above a threshold.
+/// Signed Pfaffian of a single owned ``Array2``: copies it into a flat row-major buffer and runs
+/// [`pfaffian_from_flat`]. This is the per-matrix worker that [`signed_pfaffian_owned`] maps over the
+/// batch (the copy from the numpy view happens once in [`owned_matrices`] and once here, matching the
+/// released kernel); the slog entry points use their own single-copy [`flat_matrices`] path.
+fn pfaffian_one<T>(matrix: Array2<T>) -> T
+where
+    T: Copy
+        + Zero
+        + One
+        + Magnitude
+        + Neg<Output = T>
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>,
+{
+    let dimension = matrix.nrows();
+    pfaffian_from_flat(matrix.iter().copied().collect(), dimension)
+}
+
+/// Log-domain signed Pfaffian ``(phase, log|Pf|)`` of a single skew-symmetric matrix (flat buffer).
 ///
-/// The batch elements are independent, so they are mapped over rayon threads; the per-matrix
-/// Parlett-Reid elimination itself stays sequential. The caller releases the GIL around this.
+/// The same Parlett-Reid elimination as [`pfaffian_from_flat`], but the linear product of the
+/// superdiagonal entries is factored into a unit-modulus ``phase`` (native type) and a ``log|Pf|``
+/// accumulated in ``f64`` (``+= |pivot|.ln()``), which neither overflows for large matrices nor
+/// underflows for tiny Pfaffians. A zero pivot is detected exactly (magnitude ``== 0``, not an epsilon
+/// threshold), giving ``(0, -inf)`` for that matrix; its remaining updates would be benign, so the
+/// early return is equivalent. Odd ``dimension`` gives ``(0, -inf)`` and ``dimension == 0`` gives
+/// ``(1, 0)``. Reconstruction ``phase * exp(log_abs)`` equals the value [`pfaffian_from_flat`] would
+/// return, up to the log/exp rounding, so it matches ``signed_pfaffian_*`` within tolerance.
+fn slog_pfaffian_from_flat<T>(mut data: Vec<T>, dimension: usize) -> (T, f64)
+where
+    T: Copy
+        + Zero
+        + One
+        + SlogScalar
+        + Neg<Output = T>
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>,
+{
+    if dimension % 2 == 1 {
+        return (T::zero(), f64::NEG_INFINITY);
+    }
+    if dimension == 0 {
+        return (T::one(), 0.0);
+    }
+    let mut sign = T::one();
+    let mut column = 0usize;
+    while column + 2 < dimension {
+        // Partial pivoting: largest magnitude data[row, column] for row > column + 1.
+        let mut pivot_row = column + 2;
+        let mut best = data[(column + 2) * dimension + column].magnitude();
+        for row in (column + 3)..dimension {
+            let candidate = data[row * dimension + column].magnitude();
+            if candidate > best {
+                best = candidate;
+                pivot_row = row;
+            }
+        }
+        if best > data[(column + 1) * dimension + column].magnitude() {
+            // Congruence swap of rows then columns column+1 <-> pivot_row; each swap flips the phase.
+            for index in 0..dimension {
+                data.swap((column + 1) * dimension + index, pivot_row * dimension + index);
+            }
+            for index in 0..dimension {
+                data.swap(index * dimension + (column + 1), index * dimension + pivot_row);
+            }
+            sign = -sign;
+        }
+        let pivot = data[(column + 1) * dimension + column];
+        if pivot.magnitude() == 0.0 {
+            // Exact zero pivot column: Pf = 0 with no epsilon fudge.
+            return (T::zero(), f64::NEG_INFINITY);
+        }
+        // Rank-2 skew Schur-complement update on the trailing block, read from originals.
+        let base = column + 2;
+        let length = dimension - base;
+        let tau: Vec<T> = (0..length).map(|k| data[(base + k) * dimension + column] / pivot).collect();
+        let next: Vec<T> = (0..length).map(|k| data[(base + k) * dimension + (column + 1)]).collect();
+        for row_offset in 0..length {
+            let tau_row = tau[row_offset];
+            let next_row = next[row_offset];
+            let start = (base + row_offset) * dimension + base;
+            let row = &mut data[start..start + length];
+            for column_offset in 0..length {
+                row[column_offset] =
+                    row[column_offset] + tau_row * next[column_offset] - next_row * tau[column_offset];
+            }
+        }
+        column += 2;
+    }
+    // Factor the product of the superdiagonal entries into (unit phase, sum of log-magnitudes).
+    let mut phase = sign;
+    let mut log_abs = 0.0_f64;
+    let mut index = 0usize;
+    while index < dimension {
+        let entry = data[index * dimension + (index + 1)];
+        let magnitude = entry.magnitude();
+        if magnitude == 0.0 {
+            return (T::zero(), f64::NEG_INFINITY);
+        }
+        phase = phase * entry.unit_phase();
+        log_abs += magnitude.ln();
+        index += 2;
+    }
+    (phase, log_abs)
+}
+
+/// Build one flat row-major buffer per ``(n, n)`` slice of a ``(batch, n, n)`` view (one copy each)
+/// and return them together with the shared matrix dimension ``n``.
+fn flat_matrices<T: numpy::Element + Copy>(matrix: &PyReadonlyArray3<'_, T>) -> (Vec<Vec<T>>, usize) {
+    let view = matrix.as_array();
+    let batch = view.shape()[0];
+    let dimension = view.shape()[1];
+    let flats = (0..batch)
+        .map(|index| view.index_axis(Axis(0), index).iter().copied().collect())
+        .collect();
+    (flats, dimension)
+}
+
+/// Signed Pfaffian of each owned matrix, computed in parallel across the batch above a threshold.
 fn signed_pfaffian_owned<T>(matrices: Vec<Array2<T>>) -> Vec<T>
 where
     T: Copy
@@ -163,6 +315,28 @@ fn owned_matrices<T: numpy::Element + Clone>(matrix: &PyReadonlyArray3<'_, T>) -
     let view = matrix.as_array();
     let batch = view.shape()[0];
     (0..batch).map(|index| view.index_axis(Axis(0), index).to_owned()).collect()
+}
+
+/// Log-domain signed Pfaffian ``(phase, log|Pf|)`` of each flat matrix, parallel above a threshold.
+fn signed_slog_flat<T>(flats: Vec<Vec<T>>, dimension: usize) -> Vec<(T, f64)>
+where
+    T: Copy
+        + Zero
+        + One
+        + SlogScalar
+        + Neg<Output = T>
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>
+        + Send
+        + Sync,
+{
+    if flats.len() >= PARALLEL_BATCH_THRESHOLD {
+        flats.into_par_iter().map(|flat| slog_pfaffian_from_flat(flat, dimension)).collect()
+    } else {
+        flats.into_iter().map(|flat| slog_pfaffian_from_flat(flat, dimension)).collect()
+    }
 }
 
 /// Signed Pfaffian of a batch of ``float64`` skew-symmetric matrices, shape ``(batch, n, n)``.
@@ -214,6 +388,63 @@ fn signed_pfaffian_c64<'py>(
     Array1::from(results).into_pyarray(py)
 }
 
+/// Log-domain signed Pfaffian of a batch of ``float64`` matrices: returns ``(phase, log|Pf|)`` arrays.
+#[pyfunction]
+fn signed_slog_pfaffian_f64<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, f64>,
+) -> (Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>) {
+    let (flats, dimension) = flat_matrices(&matrix);
+    let results = py.allow_threads(|| signed_slog_flat(flats, dimension));
+    let (phases, logs): (Vec<f64>, Vec<f64>) = results.into_iter().unzip();
+    (Array1::from(phases).into_pyarray(py), Array1::from(logs).into_pyarray(py))
+}
+
+/// Log-domain signed Pfaffian of a batch of ``float32`` matrices: returns ``(phase, log|Pf|)`` arrays.
+///
+/// ``log|Pf|`` is accumulated in ``f64`` for accuracy and cast to ``float32`` at the boundary.
+#[pyfunction]
+fn signed_slog_pfaffian_f32<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, f32>,
+) -> (Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>) {
+    let (flats, dimension) = flat_matrices(&matrix);
+    let results = py.allow_threads(|| signed_slog_flat(flats, dimension));
+    let (phases, logs): (Vec<f32>, Vec<f64>) = results.into_iter().unzip();
+    let logs: Vec<f32> = logs.into_iter().map(|value| value as f32).collect();
+    (Array1::from(phases).into_pyarray(py), Array1::from(logs).into_pyarray(py))
+}
+
+/// Log-domain signed Pfaffian of a batch of ``complex128`` matrices: returns ``(phase, log|Pf|)``.
+///
+/// ``phase`` is the unit-modulus complex phasor; ``log|Pf|`` is the real (``float64``) log-magnitude.
+#[pyfunction]
+fn signed_slog_pfaffian_c128<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, Complex64>,
+) -> (Bound<'py, PyArray1<Complex64>>, Bound<'py, PyArray1<f64>>) {
+    let (flats, dimension) = flat_matrices(&matrix);
+    let results = py.allow_threads(|| signed_slog_flat(flats, dimension));
+    let (phases, logs): (Vec<Complex64>, Vec<f64>) = results.into_iter().unzip();
+    (Array1::from(phases).into_pyarray(py), Array1::from(logs).into_pyarray(py))
+}
+
+/// Log-domain signed Pfaffian of a batch of ``complex64`` matrices: returns ``(phase, log|Pf|)``.
+///
+/// ``phase`` is the unit-modulus complex phasor; ``log|Pf|`` is accumulated in ``f64`` and cast to
+/// the real ``float32`` type at the boundary.
+#[pyfunction]
+fn signed_slog_pfaffian_c64<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, Complex32>,
+) -> (Bound<'py, PyArray1<Complex32>>, Bound<'py, PyArray1<f32>>) {
+    let (flats, dimension) = flat_matrices(&matrix);
+    let results = py.allow_threads(|| signed_slog_flat(flats, dimension));
+    let (phases, logs): (Vec<Complex32>, Vec<f64>) = results.into_iter().unzip();
+    let logs: Vec<f32> = logs.into_iter().map(|value| value as f32).collect();
+    (Array1::from(phases).into_pyarray(py), Array1::from(logs).into_pyarray(py))
+}
+
 #[pymodule]
 fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(signed_pfaffian_f64, module)?)?;
@@ -221,15 +452,19 @@ fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(signed_pfaffian_f16, module)?)?;
     module.add_function(wrap_pyfunction!(signed_pfaffian_c128, module)?)?;
     module.add_function(wrap_pyfunction!(signed_pfaffian_c64, module)?)?;
+    module.add_function(wrap_pyfunction!(signed_slog_pfaffian_f64, module)?)?;
+    module.add_function(wrap_pyfunction!(signed_slog_pfaffian_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(signed_slog_pfaffian_c128, module)?)?;
+    module.add_function(wrap_pyfunction!(signed_slog_pfaffian_c64, module)?)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::pfaffian_one;
+    use super::{pfaffian_one, slog_pfaffian_from_flat};
     use half::f16;
     use num_complex::Complex;
-    use numpy::ndarray::array;
+    use numpy::ndarray::{array, Array2};
 
     #[test]
     fn two_by_two_is_signed() {
@@ -263,7 +498,7 @@ mod tests {
     fn odd_is_zero_and_empty_is_one() {
         let odd = array![[0.0_f64, 1.0, 2.0], [-1.0, 0.0, 3.0], [-2.0, -3.0, 0.0]];
         assert_eq!(pfaffian_one(odd), 0.0);
-        let empty = numpy::ndarray::Array2::<f64>::zeros((0, 0));
+        let empty = Array2::<f64>::zeros((0, 0));
         assert_eq!(pfaffian_one(empty), 1.0);
     }
 
@@ -324,5 +559,54 @@ mod tests {
             [zero, zero, -z, zero]
         ];
         assert!(pfaffian_one(m).norm() < 1e-12);
+    }
+
+    #[test]
+    fn slog_two_by_two_reconstructs_signed() {
+        // pf([[0, -3], [3, 0]]) = -3 -> phase = -1, log|Pf| = ln(3).
+        let (phase, log_abs) = slog_pfaffian_from_flat(vec![0.0_f64, -3.0, 3.0, 0.0], 2);
+        assert!((phase - (-1.0)).abs() < 1e-12);
+        assert!((log_abs - 3.0_f64.ln()).abs() < 1e-12);
+        assert!((phase * log_abs.exp() - (-3.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn slog_matches_linear_four_by_four() {
+        let (a, b, c, d, e, f) = (1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0);
+        let data = vec![0.0, a, b, c, -a, 0.0, d, e, -b, -d, 0.0, f, -c, -e, -f, 0.0];
+        let linear = pfaffian_one(Array2::from_shape_vec((4, 4), data.clone()).unwrap());
+        let (phase, log_abs) = slog_pfaffian_from_flat(data, 4);
+        assert!((phase * log_abs.exp() - linear).abs() < 1e-9);
+    }
+
+    #[test]
+    fn slog_exact_zero_pivot_is_zero_neg_inf() {
+        // 4x4 with only the trailing 2x2 block nonzero: the first pivot column is zero, so Pf = 0.
+        let data = vec![
+            0.0_f64, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0,
+        ];
+        let (phase, log_abs) = slog_pfaffian_from_flat(data, 4);
+        assert_eq!(phase, 0.0);
+        assert_eq!(log_abs, f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn slog_odd_and_empty() {
+        let (phase, log_abs) = slog_pfaffian_from_flat(vec![0.0_f64; 9], 3);
+        assert_eq!(phase, 0.0);
+        assert_eq!(log_abs, f64::NEG_INFINITY);
+        let (phase, log_abs) = slog_pfaffian_from_flat(Vec::<f64>::new(), 0);
+        assert_eq!(phase, 1.0);
+        assert_eq!(log_abs, 0.0);
+    }
+
+    #[test]
+    fn slog_complex_two_by_two() {
+        // pf([[0, z], [-z, 0]]) = z; phase * exp(log|Pf|) reconstructs z.
+        let z = Complex::new(1.0_f64, 2.0);
+        let zero = Complex::new(0.0_f64, 0.0);
+        let (phase, log_abs) = slog_pfaffian_from_flat(vec![zero, z, -z, zero], 2);
+        let reconstructed = phase * Complex::new(log_abs.exp(), 0.0);
+        assert!((reconstructed - z).norm() < 1e-12);
     }
 }

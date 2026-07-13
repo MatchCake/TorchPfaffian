@@ -7,8 +7,10 @@ import torch
 
 import torch_pfaffian
 from tests.configs import (
+    ATOL_MATRIX_COMPARISON,
     ATOL_SCALAR_COMPARISON,
     N_RANDOM_TESTS_PER_CASE,
+    RTOL_MATRIX_COMPARISON,
     RTOL_SCALAR_COMPARISON,
     TEST_SEED,
 )
@@ -36,6 +38,24 @@ def _cofactor_pfaffian(matrix: np.ndarray) -> complex:
 def _rand_skew_complex(dimension: int, rng: np.random.Generator) -> np.ndarray:
     entries = rng.normal(size=(dimension, dimension)) + 1j * rng.normal(size=(dimension, dimension))
     return entries - entries.T
+
+
+def _block_antidiagonal(block: torch.Tensor) -> torch.Tensor:
+    # Skew matrix [[0, block], [-block^T, 0]] whose Pfaffian magnitude is |det(block)|.
+    zero = torch.zeros_like(block)
+    top = torch.cat([zero, block], dim=-1)
+    bottom = torch.cat([-block.transpose(-1, -2), zero], dim=-1)
+    return torch.cat([top, bottom], dim=-2)
+
+
+def _block_diagonal_skew(coefficients: list[float]) -> torch.Tensor:
+    # Block-diagonal skew matrix of 2x2 blocks [[0, c], [-c, 0]]; its Pfaffian is the product of the c.
+    dimension = 2 * len(coefficients)
+    matrix = torch.zeros(dimension, dimension, dtype=torch.float64)
+    for index, coefficient in enumerate(coefficients):
+        matrix[2 * index, 2 * index + 1] = coefficient
+        matrix[2 * index + 1, 2 * index] = -coefficient
+    return matrix
 
 
 class TestTorchPfaffian:
@@ -80,6 +100,14 @@ class TestTorchPfaffian:
     def _skew_matrix() -> torch.Tensor:
         return torch.tensor([[0.0, -3.0], [3.0, 0.0]], dtype=torch.float64)
 
+    @staticmethod
+    def _large_skew_matrix() -> torch.Tensor:
+        # A skew matrix larger than AUTO_SMALL_MAX so dispatch bypasses the small-m kernel and the
+        # Rust/Parlett-Reid/Det/FDBPf routing under test is exercised.
+        generator = torch.Generator().manual_seed(0)
+        full = torch.randn(8, 8, dtype=torch.float64, generator=generator)
+        return full - full.transpose(-1, -2)
+
     def test_pfaffian_signed_by_default_matches_parlett_reid(self):
         matrix = self._skew_matrix()
         torch.testing.assert_close(pfaffian(matrix), PfaffianParlettReid.apply(matrix))
@@ -94,7 +122,7 @@ class TestTorchPfaffian:
         pytest.importorskip("torch_pfaffian._rust")
         with mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake:
             fake.apply.return_value = torch.zeros(())
-            pfaffian(self._skew_matrix(), sign=True)
+            pfaffian(self._large_skew_matrix(), sign=True)
             fake.apply.assert_called_once()
 
     def test_pfaffian_routes_sign_true_to_python_when_rust_unavailable(self):
@@ -103,7 +131,7 @@ class TestTorchPfaffian:
             mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake,
         ):
             fake.apply.return_value = torch.zeros(())
-            pfaffian(self._skew_matrix(), sign=True)
+            pfaffian(self._large_skew_matrix(), sign=True)
             fake.apply.assert_called_once()
 
     def test_pfaffian_sign_true_routes_to_python_on_non_cpu_device(self):
@@ -111,6 +139,7 @@ class TestTorchPfaffian:
         pytest.importorskip("torch_pfaffian._rust")
         non_cpu_matrix = mock.MagicMock()
         non_cpu_matrix.device.type = "cuda"
+        non_cpu_matrix.shape = (8, 8)  # larger than AUTO_SMALL_MAX so the small-m kernel is bypassed
         with (
             mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust,
             mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake_python,
@@ -123,14 +152,26 @@ class TestTorchPfaffian:
     def test_pfaffian_routes_magnitude_no_grad_to_det(self):
         with mock.patch.object(torch_pfaffian, "PfaffianDet") as fake:
             fake.apply.return_value = torch.zeros(())
-            pfaffian(self._skew_matrix(), sign=False)
+            pfaffian(self._large_skew_matrix(), sign=False)
             fake.apply.assert_called_once()
 
     def test_pfaffian_routes_magnitude_with_grad_to_fdbpf(self):
-        matrix = self._skew_matrix().requires_grad_(True)
+        matrix = self._large_skew_matrix().requires_grad_(True)
         with mock.patch.object(torch_pfaffian, "PfaffianFDBPf") as fake:
             fake.apply.return_value = torch.zeros((), requires_grad=True)
             pfaffian(matrix, sign=False)
+            fake.apply.assert_called_once()
+
+    def test_pfaffian_routes_small_dimension_to_pfaffian_small(self):
+        with mock.patch.object(torch_pfaffian, "PfaffianSmall") as fake:
+            fake.apply.return_value = torch.zeros(())
+            pfaffian(self._skew_matrix(), sign=True)
+            fake.apply.assert_called_once()
+
+    def test_pfaffian_routes_small_dimension_magnitude_to_pfaffian_small(self):
+        with mock.patch.object(torch_pfaffian, "PfaffianSmall") as fake:
+            fake.apply.return_value = torch.zeros(())
+            pfaffian(self._skew_matrix(), sign=False)
             fake.apply.assert_called_once()
 
     def test_pfaffian_signed_backward_flows(self):
@@ -138,6 +179,17 @@ class TestTorchPfaffian:
         pfaffian(matrix).backward()
         assert matrix.grad is not None
         assert matrix.grad.shape == matrix.shape
+
+    def test_pfaffian_small_odd_dimension_backward_returns_zero_grad(self):
+        # Odd m <= AUTO_SMALL_MAX with grad must not raise (the small path once returned a constant with
+        # no grad_fn); backward returns a finite zero gradient, matching the large-m Parlett-Reid path.
+        generator = torch.Generator().manual_seed(1)
+        full = torch.randn(5, 5, dtype=torch.float64, generator=generator)
+        matrix = (full - full.transpose(-1, -2)).requires_grad_(True)
+        pfaffian(matrix, sign=True).sum().backward()
+        assert matrix.grad is not None
+        assert torch.isfinite(matrix.grad).all()
+        assert torch.all(matrix.grad == 0)
 
     def test_pfaffian_check_input_rejects_non_skew(self):
         non_skew = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
@@ -195,10 +247,11 @@ class TestTorchPfaffian:
         torch.testing.assert_close(result, expected, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
 
     def test_pfaffian_sign_true_complex_routes_to_rust_on_cpu(self):
-        # The Rust kernel now handles complex natively, so complex CPU inputs take the fast Rust path.
+        # The Rust kernel now handles complex natively, so complex CPU inputs above AUTO_SMALL_MAX take
+        # the fast Rust path (smaller ones take the exact unrolled kernel).
         pytest.importorskip("torch_pfaffian._rust")
         rng = np.random.default_rng(TEST_SEED)
-        matrix = torch.tensor(_rand_skew_complex(4, rng), dtype=torch.complex128)
+        matrix = torch.tensor(_rand_skew_complex(8, rng), dtype=torch.complex128)
         with mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust:
             fake_rust.apply.return_value = torch.zeros((), dtype=torch.complex128)
             pfaffian(matrix, sign=True)
@@ -261,10 +314,111 @@ class TestTorchPfaffian:
     def test_pfaffian_warns_when_result_overflows(self):
         # A 4x4 block-antidiagonal with huge entries makes the Pfaffian overflow to inf.
         block = torch.tensor([[1e200, 0.0], [0.0, 1e200]], dtype=torch.float64)
-        zero = torch.zeros_like(block)
-        top = torch.cat([zero, block], dim=-1)
-        bottom = torch.cat([-block.transpose(-1, -2), zero], dim=-1)
-        matrix = torch.cat([top, bottom], dim=-2)
+        matrix = _block_antidiagonal(block)
         with pytest.warns(RuntimeWarning, match="not finite"):
             result = pfaffian(matrix)
         assert not torch.isfinite(result).all()
+
+    def test_pfaffian_check_finite_false_skips_overflow_warning(self):
+        # check_finite=False skips the mandatory isfinite host sync (and its warning).
+        block = torch.tensor([[1e200, 0.0], [0.0, 1e200]], dtype=torch.float64)
+        matrix = _block_antidiagonal(block)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pfaffian(matrix, check_finite=False)
+        assert not any("not finite" in str(warning.message) for warning in caught)
+        assert not torch.isfinite(result).all()  # the overflow still happens; only the check is skipped
+
+    def test_pfaffian_auto_recovers_signed_transient_overflow(self):
+        # A wide-dynamic-range input whose linear product overflows mid-way while the true Pfaffian is
+        # finite is transparently recovered in the log domain: the default path returns the finite value
+        # with no warning, while check_finite=False exposes the raw inf. No user action (no slog) needed.
+        matrix = _block_diagonal_skew([1e200, 1e200, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29])
+        raw = pfaffian(matrix, sign=True, check_finite=False)
+        assert not torch.isfinite(raw)  # the raw fast path overflows to inf
+        phase, log_abs = torch_pfaffian.slog_pfaffian(matrix)
+        expected = phase * torch.exp(log_abs).to(phase.dtype)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            recovered = pfaffian(matrix, sign=True)
+        assert torch.isfinite(recovered)
+        assert not any(issubclass(warning.category, RuntimeWarning) for warning in caught)
+        torch.testing.assert_close(recovered, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_pfaffian_auto_recovers_signed_transient_overflow_gradient_is_finite(self):
+        # The recovered value stays differentiable: the linear graph (whose saved inf Pfaffian would
+        # give 0 * inf = NaN in its backward) is discarded in favor of the log-domain reconstruction.
+        matrix = _block_diagonal_skew([1e200, 1e200, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29])
+        matrix.requires_grad_(True)
+        pfaffian(matrix, sign=True).backward()
+        assert matrix.grad is not None
+        assert torch.isfinite(matrix.grad).all()
+        assert torch.any(matrix.grad != 0)
+
+    def test_pfaffian_auto_recovers_magnitude_transient_overflow(self):
+        # The magnitude path (sign=False) recovers overflow the same way, via the log-domain magnitude.
+        matrix = _block_diagonal_skew([1e200, 1e200, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29])
+        raw = pfaffian(matrix, sign=False, check_finite=False)
+        assert not torch.isfinite(raw)
+        expected = torch.exp(torch_pfaffian.log_magnitude_pfaffian(matrix))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            recovered = pfaffian(matrix, sign=False)
+        assert torch.isfinite(recovered)
+        assert not any(issubclass(warning.category, RuntimeWarning) for warning in caught)
+        torch.testing.assert_close(recovered, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_pfaffian_magnitude_epsilon_genuinely_huge_still_warns(self):
+        # sign=False with epsilon on a genuinely out-of-range magnitude: the log-domain recovery
+        # re-applies the sqrt(epsilon) floor and, since the true value exceeds the dtype range, warns.
+        matrix = _block_antidiagonal(torch.tensor([[1e200, 0.0], [0.0, 1e200]], dtype=torch.float64))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pfaffian(matrix, sign=False, epsilon=1e-10)
+        assert not torch.isfinite(result)
+        assert any(issubclass(warning.category, RuntimeWarning) for warning in caught)
+
+    def test_auto_small_max_constant(self):
+        assert torch_pfaffian.AUTO_SMALL_MAX == 6
+
+    def test_slog_pfaffian_reconstructs_signed_pfaffian(self):
+        # The public slog wrapper returns (phase, log|Pf|) reconstructing the signed Pfaffian.
+        rng = np.random.default_rng(TEST_SEED)
+        matrix = torch.tensor(_rand_skew_complex(8, rng), dtype=torch.complex128)
+        phase, log_abs = torch_pfaffian.slog_pfaffian(matrix)
+        reconstructed = phase * torch.exp(log_abs).to(phase.dtype)
+        torch.testing.assert_close(
+            reconstructed, pfaffian(matrix, sign=True), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+
+    def test_pfaffian_epsilon_floors_magnitude_on_determinant_path(self):
+        # m = 8 > AUTO_SMALL_MAX, sign=False, epsilon given: the log-domain magnitude path floors at
+        # sqrt(epsilon), whereas the default (epsilon=None) returns the true tiny magnitude.
+        block = 1e-3 * torch.eye(4, dtype=torch.float64)
+        matrix = _block_antidiagonal(block)  # 8x8 skew, |Pf| = (1e-3)^4 = 1e-12
+        floored = pfaffian(matrix, sign=False, epsilon=1e-10)
+        torch.testing.assert_close(
+            floored, torch.tensor(1e-5, dtype=torch.float64), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+        unfloored = pfaffian(matrix, sign=False)
+        assert unfloored.item() < floored.item()
+
+    def test_pfaffian_epsilon_none_matches_default_magnitude(self):
+        rng = np.random.default_rng(TEST_SEED)
+        matrix = torch.tensor(_rand_skew_complex(8, rng).real, dtype=torch.float64)
+        matrix = 0.5 * (matrix - matrix.transpose(-1, -2))
+        torch.testing.assert_close(
+            pfaffian(matrix, sign=False, epsilon=None),
+            PfaffianDet.apply(matrix),
+            atol=ATOL_SCALAR_COMPARISON,
+            rtol=RTOL_SCALAR_COMPARISON,
+        )
+
+    def test_pfaffian_epsilon_floors_magnitude_on_small_path(self):
+        # m = 4 <= AUTO_SMALL_MAX, sign=False, epsilon given: the small path clamps |Pf| at sqrt(epsilon).
+        block = 1e-3 * torch.eye(2, dtype=torch.float64)
+        matrix = _block_antidiagonal(block)  # 4x4 skew, |Pf| = (1e-3)^2 = 1e-6
+        floored = pfaffian(matrix, sign=False, epsilon=1e-8)
+        torch.testing.assert_close(
+            floored, torch.tensor(1e-4, dtype=torch.float64), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )

@@ -137,6 +137,26 @@ class TestPfaffianFDBPf:
             matrix.grad[1], expected_invertible, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
         )
 
+    def test_exact_singular_grad_false_gives_zero_grad_at_singular(self, monkeypatch):
+        # With EXACT_SINGULAR_GRAD disabled the magnitude backward is host-sync-free: a singular
+        # element (pf at the floor) gets an exactly zero gradient, while an invertible one matches the
+        # inverse-based closed form.
+        monkeypatch.setattr(PfaffianFDBPf, "EXACT_SINGULAR_GRAD", False)
+        singular = torch.zeros(4, 4, dtype=torch.float64)
+        invertible = torch.tensor(
+            [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 2.0], [0.0, 0.0, -2.0, 0.0]],
+            dtype=torch.float64,
+        )
+        matrix = torch.stack([singular, invertible]).requires_grad_(True)
+        magnitude = PfaffianFDBPf.apply(matrix)
+        magnitude.sum().backward()
+        assert torch.isfinite(matrix.grad).all()
+        assert torch.all(matrix.grad[0] == 0)  # sync-free: singular element gets exactly zero gradient
+        expected_invertible = torch.einsum("ij->ji", 0.5 * magnitude[1].detach() * torch.linalg.inv(invertible))
+        torch.testing.assert_close(
+            matrix.grad[1], expected_invertible, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
     def test_backward_ill_conditioned_is_finite_and_matches_inverse(self):
         # Ill-conditioned invertible input (the regime where the SVD pseudo-inverse fails to converge):
         # the LU inverse stays finite and the gradient matches the inverse closed form.

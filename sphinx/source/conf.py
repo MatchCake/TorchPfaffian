@@ -92,6 +92,10 @@ bibtex_bibfiles = ["references.bib"]
 nb_execution_mode = "force"
 nb_execution_timeout = 300
 
+# Enable dollar-delimited ($...$, $$...$$) and amsmath (e.g. pmatrix) math in MyST markdown and
+# notebook markdown cells, so the LaTeX in the tutorial renders instead of showing as raw text.
+myst_enable_extensions = ["amsmath", "dollarmath"]
+
 templates_path = ["_templates"]
 exclude_patterns = []
 
@@ -104,8 +108,8 @@ html_static_path = ["_static"]
 # html_css_files = [
 #     'css/float_right.css',
 # ]
-# mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
-mathjax_path = "https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"
+# The old cdn.mathjax.org host was retired in 2017; use the maintained MathJax 3 build on jsDelivr.
+mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
 latex_engine = "xelatex"
 latex_elements = {
     "preamble": r"\usepackage{physics}"

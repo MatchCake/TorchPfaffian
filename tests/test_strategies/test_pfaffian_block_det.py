@@ -131,6 +131,25 @@ class TestPfaffianBlockDet:
             matrix.grad[1, :3, 3:], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
         )
 
+    def test_exact_singular_grad_false_gives_zero_grad_at_singular(self, monkeypatch):
+        # With EXACT_SINGULAR_GRAD disabled the backward is host-sync-free: a singular block (pf == 0)
+        # gets an exactly zero gradient, while an invertible one matches the inverse-based closed form.
+        monkeypatch.setattr(PfaffianBlockDet, "EXACT_SINGULAR_GRAD", False)
+        rng = np.random.default_rng(TEST_SEED)
+        singular_block = torch.zeros(3, 3, dtype=torch.float64)
+        invertible_block = torch.tensor(rng.random((3, 3))) + torch.eye(3)
+        matrix = torch.stack(
+            [_block_antidiagonal(singular_block), _block_antidiagonal(invertible_block)]
+        ).requires_grad_(True)
+        PfaffianBlockDet.apply(matrix).sum().backward()
+        assert torch.isfinite(matrix.grad).all()
+        assert torch.all(matrix.grad[0] == 0)  # sync-free: singular block gets exactly zero gradient
+        constant = (-1) ** (3 * (3 - 1) // 2)
+        expected = constant * torch.linalg.det(invertible_block) * torch.linalg.inv(invertible_block).transpose(-1, -2)
+        torch.testing.assert_close(
+            matrix.grad[1, :3, 3:], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
     def test_adjugate_override_delegates_to_parlett_reid(self):
         # PfaffianBlockDet.forward is block-only, so its adjugate must defer to the general strategy.
         from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid
