@@ -262,3 +262,27 @@ class TestPfaffianStrategy:
     def test_class_singularity_constants(self):
         assert PfaffianStrategy.SINGULARITY_RTOL_EXPONENT == 0.75
         assert PfaffianStrategy.INVERSE_RESIDUAL_RTOL_EXPONENT == 0.5
+
+    def test_exact_singular_grad_default_is_true(self):
+        # The default keeps the historical exact minor-based adjugate at singular elements.
+        assert PfaffianStrategy.EXACT_SINGULAR_GRAD is True
+
+    def test_grad_matrix_sync_free_gives_zero_grad_at_singular(self, monkeypatch):
+        # With EXACT_SINGULAR_GRAD disabled the backward is host-sync-free: exactly-singular elements
+        # (pf == 0) receive an exactly zero gradient, while invertible elements match the inverse form.
+        monkeypatch.setattr(PfaffianParlettReid, "EXACT_SINGULAR_GRAD", False)
+        singular = torch.zeros(4, 4, dtype=torch.float64)
+        singular[2, 3] = 1.0
+        singular[3, 2] = -1.0
+        invertible = _random_skew(4, seed=1)
+        matrix = torch.stack([singular, invertible])
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        assert pfaffian[0] == 0.0  # the improved forward returns exactly 0 for the singular element
+        grad_output = torch.ones(2, dtype=torch.float64)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
+        assert torch.isfinite(result).all()
+        assert torch.all(result[0] == 0)  # sync-free: singular element gets exactly zero gradient
+        expected_invertible = torch.einsum("ij->ji", 0.5 * grad_output[1] * pfaffian[1] * torch.linalg.inv(invertible))
+        torch.testing.assert_close(
+            result[1], expected_invertible, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )

@@ -56,6 +56,16 @@ class PfaffianBlockDet(PfaffianStrategy):
         block = matrix[..., :n, n:]  # (..., n, n) upper-right block
         constant = (-1) ** (n * (n - 1) // 2)
         singular = pf == 0
+        if not PfaffianBlockDet.EXACT_SINGULAR_GRAD:
+            # Sync-free path: multiplying the inverse by pf zeroes the gradient at singular blocks
+            # (pf == 0) exactly, so no host branch runs.
+            identity = torch.eye(n, dtype=matrix.dtype, device=matrix.device).expand_as(block)
+            safe_block = torch.where(singular[..., None, None], identity, block)
+            inverse, _ = torch.linalg.inv_ex(safe_block)
+            adjugate_transpose = pf[..., None, None] * inverse.transpose(-1, -2)  # zero where pf == 0
+            grad_matrix = torch.zeros_like(matrix)
+            grad_matrix[..., :n, n:] = grad_output[..., None, None] * adjugate_transpose
+            return grad_matrix
         if bool(singular.any()):
             identity = torch.eye(n, dtype=matrix.dtype, device=matrix.device).expand_as(block)
             safe_block = torch.where(singular[..., None, None], identity, block)

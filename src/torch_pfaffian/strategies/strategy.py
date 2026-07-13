@@ -6,6 +6,11 @@ import torch
 class PfaffianStrategy(torch.autograd.Function):
     EPSILON = 1e-30
     NAME = "PfaffianStrategy"
+    # When True (default) the singular-element gradient is the exact minor-based Pfaffian adjugate,
+    # which preserves the historical behavior at the cost of one host synchronization per backward.
+    # When False the backward is fully sync-free: singular elements (pf == 0) get an exactly zero
+    # gradient via torch.where, so no .any()/.item() branch and no minor loop run.
+    EXACT_SINGULAR_GRAD = True
     # A batch element is routed to the exact minor-based adjugate when |pf| <= eps^0.75 * scale^(n/2)
     # (relative to the entry scale, since pf is a degree-n/2 polynomial in the entries), or when the
     # LU inverse fails its residual check ||A A^{-1} - I||_max > eps^0.5. Exponents of the dtype eps
@@ -70,6 +75,11 @@ class PfaffianStrategy(torch.autograd.Function):
         Wirtinger convention for complex autograd (``z.grad = d L / d conj(z)``). For real inputs the
         conjugation is a no-op, so real gradients are unchanged.
 
+        All of the above assumes :attr:`EXACT_SINGULAR_GRAD` is ``True`` (the default). When it is
+        ``False`` the backward takes a fully host-synchronization-free path: singular elements
+        (``pf == 0``) receive an exactly zero gradient (the true Pfaffian-adjugate derivative there is
+        nonzero only at corank exactly 2), skipping the ``.any()`` branch and the minor loop entirely.
+
         :param matrix: The saved input matrix of shape ``(..., n, n)``.
         :param pfaffian: The saved forward Pfaffian of shape ``(...,)``.
         :param grad_output: Gradient of the output with respect to the loss, of shape ``(...,)``.
@@ -79,6 +89,15 @@ class PfaffianStrategy(torch.autograd.Function):
         dimension = matrix.shape[-1]
         if dimension == 0:
             return torch.zeros_like(matrix)  # pf of a 0x0 matrix is the constant 1; the gradient is empty
+        if not cls.EXACT_SINGULAR_GRAD:
+            # Sync-free path: singular elements (pf == 0) get an exactly zero gradient (multiplying the
+            # inverse by pf zeroes it there), so no host branch and no minor loop are needed.
+            singular = pfaffian == 0
+            identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+            safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
+            inverse, _ = torch.linalg.inv_ex(safe_matrix)  # non-raising; discarded where singular
+            adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; exactly zero where pf == 0
+            return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate.conj())
         epsilon = torch.finfo(matrix.dtype).eps
         entry_scale = matrix.abs().amax(dim=(-2, -1))  # (...,)
         log_threshold = (dimension // 2) * torch.log(entry_scale) + cls.SINGULARITY_RTOL_EXPONENT * math.log(epsilon)

@@ -6,6 +6,8 @@ from .pfaffian_block_det import PfaffianBlockDet
 from .pfaffian_det import PfaffianDet
 from .pfaffian_fdbpf import PfaffianFDBPf
 from .pfaffian_parlett_reid import PfaffianParlettReid
+from .pfaffian_slog import SlogPfaffianStrategy
+from .pfaffian_small import PfaffianSmall
 from .strategy import PfaffianStrategy
 
 try:

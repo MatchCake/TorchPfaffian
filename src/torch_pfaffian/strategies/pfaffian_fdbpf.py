@@ -48,10 +48,18 @@ class PfaffianFDBPf(PfaffianStrategy):
         # The forward clamps the radicand at EPSILON, so a singular element has pf exactly at the floor
         # sqrt(EPSILON) (or 0 for odd dimensions). Computing the floor with the same dtype and sqrt as
         # the forward makes the comparison exact rather than dependent on a hand-written threshold.
+        dimension = matrix.shape[-1]
         singular_floor = matrix.new_tensor(PfaffianFDBPf.EPSILON).sqrt()
         singular = pf <= singular_floor
+        if not PfaffianFDBPf.EXACT_SINGULAR_GRAD:
+            # Sync-free path: replace singular elements by the identity for the batched inverse and
+            # assign them an exactly zero gradient, so no host branch runs.
+            identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+            safe_matrix = torch.where(singular[..., None, None], identity, matrix)
+            inverse, _ = torch.linalg.inv_ex(safe_matrix)
+            grad = torch.einsum("...,...ij->...ji", 0.5 * grad_output * pf, inverse)
+            return torch.where(singular[..., None, None], torch.zeros_like(grad), grad)
         if bool(singular.any()):
-            dimension = matrix.shape[-1]
             identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
             safe_matrix = torch.where(singular[..., None, None], identity, matrix)
             inverse = torch.linalg.inv(safe_matrix)
