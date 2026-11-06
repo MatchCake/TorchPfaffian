@@ -42,6 +42,23 @@ _FORWARD_MATRICES = _random_skew_matrices([(8, 8), (16, 6, 6), (18, 10, 10)], N_
 _GRADCHECK_MATRICES = _well_conditioned_skew_matrices([(4, 4), (6, 6), (8, 4, 4)], N_RANDOM_TESTS_PER_CASE)
 
 
+def _well_conditioned_complex_skew_matrices(shapes: list[tuple[int, ...]], count: int, min_abs_det: float = 0.1):
+    matrices = []
+    for shape in shapes:
+        kept = 0
+        while kept < count:
+            candidate = _skew(_RNG.normal(size=shape) + 1j * _RNG.normal(size=shape))
+            if np.all(np.abs(np.linalg.det(candidate)) > min_abs_det):
+                matrices.append(candidate)
+                kept += 1
+    return matrices
+
+
+_COMPLEX_GRADCHECK_MATRICES = _well_conditioned_complex_skew_matrices(
+    [(4, 4), (8, 8), (3, 6, 6)], N_RANDOM_TESTS_PER_CASE
+)
+
+
 class TestPfaffianFDBPf:
     @pytest.mark.parametrize("skew_matrix", _FORWARD_MATRICES)
     def test_forward_square_of_pfaffian_matches_determinant(self, skew_matrix):
@@ -168,3 +185,60 @@ class TestPfaffianFDBPf:
         expected = torch.einsum("ij->ji", 0.5 * magnitude.detach() * torch.linalg.inv(matrix.detach()))
         assert torch.isfinite(matrix.grad).all()
         torch.testing.assert_close(matrix.grad, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    @pytest.mark.parametrize("skew_matrix", _COMPLEX_GRADCHECK_MATRICES)
+    def test_backward_complex_passes_gradcheck(self, skew_matrix):
+        # Regression for issue #17: the complex backward raised on a complex comparison, and the
+        # gradient of |pf| needs conj(A^{-T}) under PyTorch's Wirtinger convention.
+        skew_tensor = torch.tensor(skew_matrix, dtype=torch.complex128, requires_grad=True)
+        assert gradcheck(
+            PfaffianFDBPf.apply, (skew_tensor,), eps=1e-6, atol=ATOL_APPROX_COMPARISON, rtol=RTOL_APPROX_COMPARISON
+        )
+
+    @pytest.mark.parametrize("skew_matrix", _COMPLEX_GRADCHECK_MATRICES[:N_RANDOM_TESTS_PER_CASE])
+    def test_backward_complex_sync_free_passes_gradcheck(self, skew_matrix, monkeypatch):
+        monkeypatch.setattr(PfaffianFDBPf, "EXACT_SINGULAR_GRAD", False)
+        skew_tensor = torch.tensor(skew_matrix, dtype=torch.complex128, requires_grad=True)
+        assert gradcheck(
+            PfaffianFDBPf.apply, (skew_tensor,), eps=1e-6, atol=ATOL_APPROX_COMPARISON, rtol=RTOL_APPROX_COMPARISON
+        )
+
+    @pytest.mark.parametrize("dtype", [torch.complex64, torch.complex128])
+    def test_backward_complex_gradient_matches_conjugate_inverse_closed_form(self, dtype):
+        # d|pf|/d conj(A) in PyTorch's convention is (|pf| / 2) conj(A^{-T}); the gradient keeps the
+        # complex dtype of the input.
+        matrix = torch.tensor(_COMPLEX_GRADCHECK_MATRICES[0], dtype=dtype, requires_grad=True)
+        magnitude = PfaffianFDBPf.apply(matrix)
+        magnitude.backward()
+        expected = 0.5 * magnitude.detach() * torch.linalg.inv(matrix.detach()).transpose(-1, -2).conj()
+        assert matrix.grad.dtype == dtype
+        torch.testing.assert_close(matrix.grad, expected)
+
+    @pytest.mark.parametrize("exact_singular_grad", [True, False])
+    def test_backward_complex_mixed_singular_invertible_batch_is_finite(self, exact_singular_grad, monkeypatch):
+        monkeypatch.setattr(PfaffianFDBPf, "EXACT_SINGULAR_GRAD", exact_singular_grad)
+        singular = torch.zeros(4, 4, dtype=torch.complex128)
+        invertible = torch.tensor(_COMPLEX_GRADCHECK_MATRICES[0], dtype=torch.complex128)
+        matrix = torch.stack([singular, invertible]).requires_grad_(True)
+        magnitude = PfaffianFDBPf.apply(matrix)
+        magnitude.sum().backward()
+        assert torch.isfinite(matrix.grad).all()
+        expected_invertible = 0.5 * magnitude[1].detach() * torch.linalg.inv(invertible).transpose(-1, -2).conj()
+        torch.testing.assert_close(
+            matrix.grad[1], expected_invertible, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    @pytest.mark.parametrize("exact_singular_grad", [True, False])
+    @pytest.mark.parametrize("dtype", [torch.complex64, torch.complex128])
+    @pytest.mark.parametrize("shape", [(3, 3), (7, 7), (2, 5, 5)])
+    def test_backward_complex_odd_dimension_gradient_is_zero(self, shape, dtype, exact_singular_grad, monkeypatch):
+        # Odd-dimensional skew matrices are singular, so |pf| = 0 and the gradient is exactly zero. The
+        # forward returns a real magnitude so the backward's floor comparison is defined for complex input.
+        monkeypatch.setattr(PfaffianFDBPf, "EXACT_SINGULAR_GRAD", exact_singular_grad)
+        entries = _RNG.normal(size=shape) + 1j * _RNG.normal(size=shape)
+        matrix = torch.tensor(_skew(entries), dtype=dtype, requires_grad=True)
+        magnitude = PfaffianFDBPf.apply(matrix)
+        assert not magnitude.is_complex()
+        magnitude.sum().backward()
+        assert matrix.grad.dtype == dtype
+        torch.testing.assert_close(matrix.grad, torch.zeros_like(matrix))
