@@ -7,9 +7,11 @@ import torch
 
 import torch_pfaffian
 from tests.configs import (
+    ATOL_APPROX_COMPARISON,
     ATOL_MATRIX_COMPARISON,
     ATOL_SCALAR_COMPARISON,
     N_RANDOM_TESTS_PER_CASE,
+    RTOL_APPROX_COMPARISON,
     RTOL_MATRIX_COMPARISON,
     RTOL_SCALAR_COMPARISON,
     TEST_SEED,
@@ -280,6 +282,30 @@ class TestTorchPfaffian:
 
         assert torch.autograd.gradcheck(
             lambda free: pfaffian(from_parameters(free), sign=True), (parameters,), eps=1e-6, atol=1e-4, rtol=1e-4
+        )
+
+    @pytest.mark.parametrize("epsilon", [None, 1e-32])
+    def test_pfaffian_sign_false_complex_backward_passes_gradcheck(self, epsilon):
+        # Regression for issue #17: m = 8 > AUTO_SMALL_MAX with grad routes the default (epsilon=None)
+        # magnitude through PfaffianFDBPf, whose backward raised on complex input.
+        dimension = 8
+        count = dimension * (dimension - 1) // 2
+        rng = np.random.default_rng(TEST_SEED)
+        values = rng.normal(size=count) + 1j * rng.normal(size=count)
+        parameters = torch.tensor(values, dtype=torch.complex128, requires_grad=True)
+
+        def from_parameters(free):
+            upper = torch.zeros(dimension, dimension, dtype=free.dtype)
+            indices = torch.triu_indices(dimension, dimension, offset=1)
+            upper = upper.index_put((indices[0], indices[1]), free)
+            return upper - upper.transpose(-1, -2)
+
+        assert torch.autograd.gradcheck(
+            lambda free: pfaffian(from_parameters(free), sign=False, epsilon=epsilon),
+            (parameters,),
+            eps=1e-6,
+            atol=ATOL_APPROX_COMPARISON,
+            rtol=RTOL_APPROX_COMPARISON,
         )
 
     def test_pfaffian_sign_true_complex_odd_dimension_is_zero(self):
