@@ -30,6 +30,12 @@ warnings.filterwarnings("ignore", category=Warning, module="sphinx")
 # Matrices with last dimension at most AUTO_SMALL_MAX are routed to the exact unrolled small-m kernel,
 # which is the measured CPU winner in that range; larger inputs use the Parlett-Reid / determinant paths.
 AUTO_SMALL_MAX = 6
+# Inputs with at least AUTO_BLOCK_DET_MIN_NUMEL entries whose matrices all have the block form
+# [[0, B], [-B^T, 0]] are routed to PfaffianBlockDet (one n x n determinant). Below this size the block-form
+# check and the strategy's overhead outweigh its gain over the general paths (measured on CPU).
+AUTO_BLOCK_DET_MIN_NUMEL = 2**14
+# Dtypes with an LU determinant; other dtypes (e.g. float16) keep the general routes.
+_BLOCK_DET_DTYPES = (torch.float32, torch.float64, torch.complex64, torch.complex128)
 
 pfaffian_strategy_map = {_cls.NAME.lower().strip(): _cls for _cls in get_all_subclasses(PfaffianStrategy)}
 
@@ -79,6 +85,7 @@ def pfaffian(
     Condition                                   Strategy                     Reason
     ==========================================  ===========================  ==================================
     ``m <= AUTO_SMALL_MAX``                     ``PfaffianSmall``            exact unrolled kernel (all dtypes)
+    block form, large input (see below)         ``PfaffianBlockDet``         one ``n x n`` determinant
     ``sign=True``, Rust built, CPU input         ``RustPfaffianParlettReid``  fastest signed path (native Rust)
     ``sign=True``, otherwise                     ``PfaffianParlettReid``      GPU-native and pure-Python fallback
     ``sign=False``, ``epsilon`` given            ``magnitude_pfaffian``       log-domain magnitude with floor
@@ -93,6 +100,14 @@ def pfaffian(
     natively on the input device and avoids a host round-trip. All signed strategies compute the correct
     complex signed Pfaffian without discarding the imaginary part and are differentiable end-to-end for
     real and complex inputs (the complex backward follows PyTorch's Wirtinger convention).
+
+    Inputs with ``m > AUTO_SMALL_MAX`` and at least ``AUTO_BLOCK_DET_MIN_NUMEL`` entries in total are
+    tested for the block form ``[[0, B], [-B^T, 0]]`` (both diagonal blocks exactly zero for every batch
+    element). When it holds, ``PfaffianBlockDet`` computes ``pf = (-1)^{n(n-1)/2} det(B)`` from the
+    ``n x n`` block, for ``sign=True`` and for ``sign=False`` without ``epsilon`` (where the magnitude is
+    floored at ``sqrt(PfaffianStrategy.EPSILON)`` like the determinant paths). Only float32, float64,
+    complex64 and complex128 inputs are routed. The test rejects a general input after reading one entry
+    per matrix, and the gradient matches the general strategies.
 
     The Pfaffian is only defined for skew-symmetric matrices; the strategies assume this and do not
     check it. Pass ``check_input=True`` to validate the assumption. The chosen strategy is the fastest
@@ -120,7 +135,8 @@ def pfaffian(
     :param epsilon: Only affects the magnitude path (``sign=False``). When a float is given, the
         magnitude is computed in the log domain and floored at ``sqrt(epsilon)`` (keeping gradients
         alive below the floor). When ``None`` (default), the routing is unchanged and the magnitude is
-        computed via ``PfaffianFDBPf`` / ``PfaffianDet`` using ``PfaffianStrategy.EPSILON``.
+        computed via ``PfaffianFDBPf`` / ``PfaffianDet`` (or ``PfaffianBlockDet`` for large block-form
+        inputs) and floored at ``sqrt(PfaffianStrategy.EPSILON)``.
     :return: The Pfaffian of the input, of shape ``(...,)``.
     :rtype: torch.Tensor
     """
@@ -138,6 +154,17 @@ def pfaffian(
             result = PfaffianSmall.apply(matrix).abs()
             if epsilon is not None:
                 result = torch.clamp(result, min=epsilon**0.5)
+    elif (
+        (sign or epsilon is None)
+        and matrix.numel() >= AUTO_BLOCK_DET_MIN_NUMEL
+        and matrix.dtype in _BLOCK_DET_DTYPES
+        and PfaffianBlockDet.is_block_form(matrix)
+    ):
+        # The block form was just checked, so the strategy's own check is skipped.
+        result = PfaffianBlockDet.apply(matrix, False)
+        if not sign:
+            # Same floor as the PfaffianDet / PfaffianFDBPf magnitude paths this route replaces.
+            result = torch.clamp(result.abs(), min=PfaffianStrategy.EPSILON**0.5)
     elif sign:
         # The Rust kernel is CPU-only, so non-CPU inputs use the device-native PyTorch strategy.
         if RustPfaffianParlettReid is not None and matrix.device.type == "cpu":

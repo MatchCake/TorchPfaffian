@@ -17,7 +17,7 @@ from tests.configs import (
     TEST_SEED,
 )
 from torch_pfaffian import get_pfaffian_function, pfaffian, pfaffian_strategy_map
-from torch_pfaffian.strategies import PfaffianDet, PfaffianFDBPf, PfaffianParlettReid
+from torch_pfaffian.strategies import PfaffianBlockDet, PfaffianDet, PfaffianFDBPf, PfaffianParlettReid
 
 
 def _cofactor_pfaffian(matrix: np.ndarray) -> complex:
@@ -142,6 +142,7 @@ class TestTorchPfaffian:
         non_cpu_matrix = mock.MagicMock()
         non_cpu_matrix.device.type = "cuda"
         non_cpu_matrix.shape = (8, 8)  # larger than AUTO_SMALL_MAX so the small-m kernel is bypassed
+        non_cpu_matrix.numel.return_value = 64  # below AUTO_BLOCK_DET_MIN_NUMEL, so no block-form check
         with (
             mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust,
             mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake_python,
@@ -406,6 +407,81 @@ class TestTorchPfaffian:
 
     def test_auto_small_max_constant(self):
         assert torch_pfaffian.AUTO_SMALL_MAX == 6
+
+    def test_auto_block_det_min_numel_constant(self):
+        assert torch_pfaffian.AUTO_BLOCK_DET_MIN_NUMEL == 2**14
+
+    @staticmethod
+    def _large_block_form_batch(dtype: torch.dtype = torch.float64) -> torch.Tensor:
+        # 256 matrices of size 8x8 = 2**14 entries, the smallest input routed to PfaffianBlockDet.
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        block = torch.randn(256, 4, 4, dtype=dtype, generator=generator)
+        return _block_antidiagonal(block)
+
+    @pytest.mark.parametrize("sign", [True, False])
+    def test_pfaffian_routes_large_block_form_to_block_det(self, sign):
+        with mock.patch.object(torch_pfaffian, "PfaffianBlockDet", wraps=PfaffianBlockDet) as fake:
+            pfaffian(self._large_block_form_batch(), sign=sign)
+            fake.apply.assert_called_once()
+
+    def test_pfaffian_block_form_with_epsilon_keeps_magnitude_path(self):
+        # The log-domain magnitude keeps gradients alive below the floor, so it is not replaced.
+        with mock.patch.object(torch_pfaffian, "PfaffianBlockDet", wraps=PfaffianBlockDet) as fake:
+            pfaffian(self._large_block_form_batch(), sign=False, epsilon=1e-20)
+            fake.apply.assert_not_called()
+
+    def test_pfaffian_small_block_form_input_is_not_routed_to_block_det(self):
+        with mock.patch.object(torch_pfaffian, "PfaffianBlockDet", wraps=PfaffianBlockDet) as fake:
+            pfaffian(self._large_block_form_batch()[:255], sign=True)
+            fake.is_block_form.assert_not_called()
+            fake.apply.assert_not_called()
+
+    def test_pfaffian_large_general_input_is_not_routed_to_block_det(self):
+        general = self._large_block_form_batch().clone()
+        general[-1] = self._large_skew_matrix()
+        with mock.patch.object(torch_pfaffian, "PfaffianBlockDet", wraps=PfaffianBlockDet) as fake:
+            result = pfaffian(general, sign=True)
+            fake.apply.assert_not_called()
+        torch.testing.assert_close(
+            result, PfaffianParlettReid.apply(general), atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    def test_pfaffian_block_form_without_lu_dtype_is_not_routed_to_block_det(self):
+        # float16 has no LU determinant, so it keeps the general route (which upcasts in the Rust kernel).
+        dtype = torch.float16
+        matrix = self._large_block_form_batch().to(dtype)
+        with mock.patch.object(torch_pfaffian, "PfaffianBlockDet", wraps=PfaffianBlockDet) as fake:
+            result = pfaffian(matrix, sign=True)
+            fake.apply.assert_not_called()
+        assert result.dtype == dtype
+
+    def test_pfaffian_block_form_magnitude_keeps_determinant_floor(self):
+        # The magnitude route keeps the sqrt(PfaffianStrategy.EPSILON) floor of PfaffianDet/PfaffianFDBPf.
+        matrix = self._large_block_form_batch()
+        matrix[0] = 0.0
+        result = pfaffian(matrix, sign=False)
+        floor = torch.tensor(PfaffianDet.EPSILON**0.5, dtype=torch.float64)
+        torch.testing.assert_close(result[0], floor, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
+        torch.testing.assert_close(
+            result[1:], PfaffianDet.apply(matrix[1:]), atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    @pytest.mark.parametrize("sign", [True, False])
+    def test_pfaffian_block_form_route_matches_general_value_and_gradient(self, dtype, sign):
+        matrix = self._large_block_form_batch(dtype)
+        routed_input = matrix.clone().requires_grad_(True)
+        general_input = matrix.clone().requires_grad_(True)
+        routed = pfaffian(routed_input, sign=sign)
+        general = PfaffianParlettReid.apply(general_input)
+        if not sign:
+            general = general.abs()
+        torch.testing.assert_close(routed, general, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+        routed.real.sum().backward()
+        general.real.sum().backward()
+        torch.testing.assert_close(
+            routed_input.grad, general_input.grad, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
 
     def test_slog_pfaffian_reconstructs_signed_pfaffian(self):
         # The public slog wrapper returns (phase, log|Pf|) reconstructing the signed Pfaffian.

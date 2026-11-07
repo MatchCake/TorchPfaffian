@@ -1,5 +1,3 @@
-import math
-
 import torch
 
 
@@ -11,10 +9,11 @@ class PfaffianStrategy(torch.autograd.Function):
     # When False the backward is fully sync-free: singular elements (pf == 0) get an exactly zero
     # gradient via torch.where, so no .any()/.item() branch and no minor loop run.
     EXACT_SINGULAR_GRAD = True
-    # A batch element is routed to the exact minor-based adjugate when |pf| <= eps^0.75 * scale^(n/2)
-    # (relative to the entry scale, since pf is a degree-n/2 polynomial in the entries), or when the
-    # LU inverse fails its residual check ||A A^{-1} - I||_max > eps^0.5. Exponents of the dtype eps
-    # keep both criteria dtype-adaptive (float64: ~1e-12 and ~1.5e-8; float32: ~6e-6 and ~3e-4).
+    # A batch element is routed to the exact minor-based adjugate when its LU factorization has a pivot
+    # ratio min|U_ii| / max|U_ii| <= eps^0.75 (scale-free, so it does not depend on how the entries are
+    # spread), or when the LU inverse fails its residual check ||A A^{-1} - I||_max > eps^0.5. Exponents
+    # of the dtype eps keep both criteria dtype-adaptive (float64: ~1e-12 and ~1.5e-8; float32: ~6e-6
+    # and ~3e-4).
     SINGULARITY_RTOL_EXPONENT = 0.75
     INVERSE_RESIDUAL_RTOL_EXPONENT = 0.5
 
@@ -44,36 +43,35 @@ class PfaffianStrategy(torch.autograd.Function):
         inverse); for (numerically) singular inputs, where that product would be inaccurate or
         garbage, the adjugate is recomputed exactly from minor Pfaffians via
         :meth:`_pfaffian_adjugate` (using ``cls``'s own forward). The minor-based path runs only on
-        the flagged batch elements, so well-conditioned inputs keep the single cheap inverse.
+        the flagged batch elements, so well-conditioned inputs keep the single cheap inverse. Flagged
+        elements whose ``grad_output`` is exactly zero (for example the elements of a magnitude whose
+        gradient vanishes at ``pf = 0``) get a zero gradient without the minor-based path, since the
+        gradient is linear in ``grad_output``; this skip is disabled when ``grad_output`` itself requires
+        grad (double backward, forward-mode products such as ``torch.autograd.functional.jvp``).
 
-        An element is flagged singular by three dtype-adaptive criteria (see the class constants):
-        the relative magnitude test ``|pf| <= eps^0.75 * scale^(n/2)`` with ``scale`` the largest
-        entry magnitude (an exactly-singular matrix has a forward Pfaffian of round-off size, never
-        exactly ``0``, so an exact ``pf == 0`` test would route it to the LU inverse, which raises
-        on real inputs and silently returns garbage on complex inputs), the LU ``info`` returned by
-        :func:`torch.linalg.inv_ex` (``info != 0`` marks the elements the LU backend reports as
-        singular, catching a matrix the magnitude proxy missed because its forward round-off Pfaffian
-        exceeded ``eps^0.75 * scale^(n/2)``), and a residual check ``||A A^{-1} - I||_max > eps^0.5``
-        that catches ill-conditioned elements whose Pfaffian is not small (for example one tiny and
-        one huge singular-value pair). The magnitude test is evaluated in log space so ``scale^(n/2)``
-        cannot overflow. All three tests only ever move elements to the exact minor-based path, so
-        flagging a well-conditioned element costs speed, never accuracy.
+        An element is flagged by :meth:`_flagged_inverse` (the LU pivot ratio
+        ``min|U_ii| / max|U_ii| <= eps^0.75``, a nonzero LU ``info``, or an inverse residual
+        ``||A A^{-1} - I||_max > eps^0.5``), or when its forward Pfaffian is exactly ``0`` (which also
+        catches a Pfaffian that underflowed on a well-conditioned matrix with tiny entries). An
+        exactly-singular matrix has a round-off-sized LU pivot (and a round-off forward Pfaffian, rarely
+        exactly ``0``), so the pivot ratio catches it, while the residual catches ill-conditioned elements
+        whose pivots look benign. The pivot ratio is
+        scale-free: unlike a test of ``|pf|`` against ``max|A_ij|^(n/2)``, it does not flag
+        well-conditioned matrices whose entries span several orders of magnitude (e.g. block-diagonal
+        matrices). Flagging a well-conditioned element only costs speed, never accuracy.
 
-        The inverse uses :func:`torch.linalg.inv_ex` (an LU factorization) rather than
-        :func:`torch.linalg.pinv` (an SVD). A skew-symmetric ``A`` is invertible exactly when
-        ``pf(A) != 0`` (since ``det(A) = pf(A)^2``), so the inverse is only ever relied upon on the
-        invertible elements, where the LU factorization is the correct and robust tool. The SVD-based
-        pseudo-inverse can fail to converge on ill-conditioned or near-repeated-singular-value inputs,
-        which the LU factorization does not. The flagged elements (whose inverse is discarded anyway)
-        are replaced by the identity before the batched inverse to keep it well-conditioned, and
-        :func:`torch.linalg.inv_ex` returns an ``info`` code instead of raising, so a singular element
-        the magnitude test missed is reported through ``info`` rather than aborting the process from
-        inside autograd backward.
+        The inverse is an LU factorization (:func:`torch.linalg.lu_factor_ex` and
+        :func:`torch.linalg.lu_solve`, or :func:`torch.linalg.inv_ex` in double backward) rather
+        than :func:`torch.linalg.pinv` (an SVD), which can fail to converge on ill-conditioned or
+        near-repeated-singular-value inputs. A skew-symmetric ``A`` is
+        invertible exactly when ``pf(A) != 0`` (since ``det(A) = pf(A)^2``), so the inverse is only
+        relied upon on the unflagged elements. Flagged elements are solved against the identity factors
+        instead, so the batched solve never divides by a zero pivot.
 
         The Pfaffian is holomorphic in the entries of ``A``, so for complex inputs the backward returns
         the conjugate of the analytic derivative, ``conj(d pf / d A) * grad_output``, which is PyTorch's
-        Wirtinger convention for complex autograd (``z.grad = d L / d conj(z)``). For real inputs the
-        conjugation is a no-op, so real gradients are unchanged.
+        Wirtinger convention for complex autograd. For real inputs the conjugation is a no-op, so real
+        gradients are unchanged.
 
         All of the above assumes :attr:`EXACT_SINGULAR_GRAD` is ``True`` (the default). When it is
         ``False`` the backward takes a fully host-synchronization-free path: singular elements
@@ -98,26 +96,78 @@ class PfaffianStrategy(torch.autograd.Function):
             inverse, _ = torch.linalg.inv_ex(safe_matrix)  # non-raising; discarded where singular
             adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; exactly zero where pf == 0
             return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate.conj())
-        epsilon = torch.finfo(matrix.dtype).eps
-        entry_scale = matrix.abs().amax(dim=(-2, -1))  # (...,)
-        log_threshold = (dimension // 2) * torch.log(entry_scale) + cls.SINGULARITY_RTOL_EXPONENT * math.log(epsilon)
-        singular = (entry_scale == 0) | (torch.log(pfaffian.abs()) <= log_threshold)  # log(0) = -inf is covered
-        identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
-        safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # (..., n, n)
-        inverse, info = torch.linalg.inv_ex(safe_matrix)  # non-raising; info != 0 marks LU-singular elements
-        singular = singular | (info != 0)  # exactly the elements the LU backend cannot invert
-        residual = (safe_matrix @ inverse - identity).abs().amax(dim=(-2, -1))  # (...,); nan on LU-singular
-        singular = singular | (residual > epsilon**cls.INVERSE_RESIDUAL_RTOL_EXPONENT)
-        adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; discarded where singular
-        if bool(singular.any()):
+        inverse, rank_flag, residual_flag = cls._flagged_inverse(matrix)
+        singular = rank_flag | residual_flag | (pfaffian == 0)  # pf == 0 also catches an underflowed pf
+        grad_output = grad_output.expand_as(pfaffian)
+        adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; replaced where singular
+        adjugate = torch.where(singular[..., None, None], torch.zeros_like(adjugate), adjugate)
+        exact = singular & cls._grad_output_is_used(grad_output)  # elements needing the minor adjugate
+        if bool(exact.any()):
             flat_matrix = matrix.reshape(-1, dimension, dimension)
             flat_adjugate = adjugate.reshape(-1, dimension, dimension)
-            singular_index = singular.reshape(-1).nonzero(as_tuple=True)[0]
+            exact_index = exact.reshape(-1).nonzero(as_tuple=True)[0]
             with torch.no_grad():
-                singular_adjugate = cls._pfaffian_adjugate(flat_matrix.index_select(0, singular_index))
-            flat_adjugate = flat_adjugate.index_copy(0, singular_index, singular_adjugate.to(flat_adjugate.dtype))
+                exact_adjugate = cls._pfaffian_adjugate(flat_matrix.index_select(0, exact_index))
+            flat_adjugate = flat_adjugate.index_copy(0, exact_index, exact_adjugate.to(flat_adjugate.dtype))
             adjugate = flat_adjugate.reshape_as(matrix)
         return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate.conj())
+
+    @classmethod
+    def _flagged_inverse(cls, matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Batched LU inverse together with the masks of elements whose inverse cannot be trusted.
+
+        The rank flag marks elements whose LU factorization reports a zero pivot (``info != 0``) or whose
+        pivot ratio ``min|U_ii| / max|U_ii|`` is at most ``eps^SINGULARITY_RTOL_EXPONENT`` (this also
+        covers the all-zero matrix): numerically rank-deficient elements. The residual flag marks the
+        remaining elements whose residual ``||A A^{-1} - I||_max`` exceeds
+        ``eps^INVERSE_RESIDUAL_RTOL_EXPONENT`` (for example LU pivot growth). The flags are computed
+        without autograd. Flagged elements are inverted as the identity so the inverse stays finite;
+        when a graph is being built (double backward) the inverse comes from
+        :func:`torch.linalg.inv_ex` on the identity-substituted matrix, whose derivative is finite
+        everywhere, instead of from the LU factors.
+
+        :param matrix: Square matrices of shape ``(..., k, k)`` with ``k >= 1``.
+        :return: The inverse, of shape ``(..., k, k)`` (the identity where flagged), the rank flag and
+            the residual flag, both boolean of shape ``(...,)``.
+        :rtype: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        """
+        size = matrix.shape[-1]
+        epsilon = torch.finfo(matrix.dtype).eps
+        identity = torch.eye(size, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+        with torch.no_grad():
+            factors, pivots, info = torch.linalg.lu_factor_ex(matrix)
+            pivot_magnitude = factors.diagonal(dim1=-2, dim2=-1).abs()  # (..., k) |U_ii|
+            ratio_threshold = epsilon**cls.SINGULARITY_RTOL_EXPONENT * pivot_magnitude.amax(dim=-1)
+            rank_flag = (info != 0) | ~(pivot_magnitude.amin(dim=-1) > ratio_threshold)  # nan-safe
+            identity_pivots = torch.arange(1, size + 1, dtype=pivots.dtype, device=pivots.device)
+            safe_factors = torch.where(rank_flag[..., None, None], identity, factors)
+            safe_pivots = torch.where(rank_flag[..., None], identity_pivots.expand_as(pivots), pivots)
+            inverse = torch.linalg.lu_solve(safe_factors, safe_pivots, identity)
+            safe_matrix = torch.where(rank_flag[..., None, None], identity, matrix)
+            residual = (safe_matrix @ inverse - identity).abs().amax(dim=(-2, -1))  # (...,)
+            residual_flag = ~rank_flag & ~(residual <= epsilon**cls.INVERSE_RESIDUAL_RTOL_EXPONENT)
+        if torch.is_grad_enabled() and matrix.requires_grad:
+            flagged = rank_flag | residual_flag
+            inverse, _ = torch.linalg.inv_ex(torch.where(flagged[..., None, None], identity, matrix))
+        return inverse, rank_flag, residual_flag
+
+    @staticmethod
+    def _grad_output_is_used(grad_output: torch.Tensor) -> torch.Tensor:
+        """
+        Mask of the elements whose gradient depends on ``grad_output``.
+
+        The gradient is linear in ``grad_output``, so an element with ``grad_output == 0`` has a zero
+        gradient, unless ``grad_output`` requires grad (double backward, ``jvp``), where the derivative
+        with respect to ``grad_output`` is needed too.
+
+        :param grad_output: Gradient of the loss with respect to the Pfaffian, of shape ``(...,)``.
+        :return: Boolean mask of shape ``(...,)``.
+        :rtype: torch.Tensor
+        """
+        if grad_output.requires_grad:
+            return torch.ones_like(grad_output, dtype=torch.bool)
+        return grad_output != 0
 
     @classmethod
     def _pfaffian_adjugate(cls, matrices: torch.Tensor) -> torch.Tensor:
