@@ -4,8 +4,10 @@ import torch
 from tests.configs import (
     ATOL_APPROX_COMPARISON,
     ATOL_MATRIX_COMPARISON,
+    ATOL_SINGLE_PRECISION_COMPARISON,
     RTOL_APPROX_COMPARISON,
     RTOL_MATRIX_COMPARISON,
+    RTOL_SINGLE_PRECISION_COMPARISON,
     TEST_SEED,
 )
 from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid
@@ -16,6 +18,43 @@ def _random_skew(dimension: int, seed: int) -> torch.Tensor:
     generator = torch.Generator().manual_seed(seed)
     full = torch.randn(dimension, dimension, dtype=torch.float64, generator=generator)
     return full - full.transpose(-1, -2)
+
+
+def _rotated_corank(count: int, dimension: int, corank: int, dtype: torch.dtype, seed: int) -> torch.Tensor:
+    # Q^T B Q with B block-diagonal skew whose first corank / 2 blocks are zero: numerically singular, with a
+    # round-off Pfaffian. A random complex Q (not unitary) keeps the skew-symmetry and the corank.
+    generator = torch.Generator().manual_seed(seed)
+    coefficients = torch.rand(count, dimension // 2, dtype=torch.float64, generator=generator) + 0.5
+    coefficients[:, : corank // 2] = 0.0
+    block = torch.zeros(count, dimension, dimension, dtype=torch.float64)
+    even = torch.arange(0, dimension, 2)
+    block[:, even, even + 1] = coefficients
+    block[:, even + 1, even] = -coefficients
+    if dtype.is_complex:
+        rotation = torch.complex(
+            torch.randn(count, dimension, dimension, dtype=torch.float64, generator=generator),
+            torch.randn(count, dimension, dimension, dtype=torch.float64, generator=generator),
+        )
+    else:
+        rotation, _ = torch.linalg.qr(
+            torch.randn(count, dimension, dimension, dtype=torch.float64, generator=generator)
+        )
+    return (rotation.mT @ block.to(rotation.dtype) @ rotation).to(dtype)
+
+
+def _loop_adjugate(matrices: torch.Tensor) -> torch.Tensor:
+    # Reference definition P_ij = (-1)^(i+j) pf(A^(ij)) for i < j, one minor at a time.
+    dimension = matrices.shape[-1]
+    adjugate = torch.zeros_like(matrices)
+    indices = torch.arange(dimension)
+    for first in range(dimension):
+        for second in range(first + 1, dimension):
+            keep = indices[(indices != first) & (indices != second)]
+            minor = matrices.index_select(-2, keep).index_select(-1, keep)
+            value = (-1) ** (first + second) * PfaffianParlettReid.forward(minor)
+            adjugate[..., first, second] = value
+            adjugate[..., second, first] = -value
+    return adjugate
 
 
 class _RecordingContext:
@@ -269,6 +308,8 @@ class TestPfaffianStrategy:
     def test_class_singularity_constants(self):
         assert PfaffianStrategy.SINGULARITY_RTOL_EXPONENT == 0.75
         assert PfaffianStrategy.INVERSE_RESIDUAL_RTOL_EXPONENT == 0.5
+        assert PfaffianStrategy.NULL_SPACE_SEPARATION_EXPONENT == 0.25
+        assert PfaffianStrategy.MINOR_CHUNK_ELEMENTS == 1 << 20
 
     def test_exact_singular_grad_default_is_true(self):
         # The default keeps the historical exact minor-based adjugate at singular elements.
@@ -427,3 +468,235 @@ class TestPfaffianStrategy:
         torch.testing.assert_close(
             result.to(torch.float64), expected, atol=ATOL_APPROX_COMPARISON, rtol=RTOL_APPROX_COMPARISON
         )
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    @pytest.mark.parametrize("dimension", [2, 5, 6, 9])
+    def test_pfaffian_adjugate_matches_minor_definition(self, dimension, dtype, monkeypatch):
+        matrices = _rotated_corank(3, dimension, 0, dtype, seed=20) if dimension % 2 == 0 else None
+        if matrices is None:
+            entries = torch.randn(
+                3, dimension, dimension, dtype=torch.float64, generator=torch.Generator().manual_seed(21)
+            )
+            matrices = (entries - entries.mT).to(dtype)
+        expected = _loop_adjugate(matrices)
+        torch.testing.assert_close(PfaffianParlettReid._pfaffian_adjugate(matrices), expected)
+        monkeypatch.setattr(PfaffianParlettReid, "MINOR_CHUNK_ELEMENTS", 1)  # one pair per chunk
+        torch.testing.assert_close(PfaffianParlettReid._pfaffian_adjugate(matrices), expected)
+
+    def test_pfaffian_adjugate_of_empty_batch(self):
+        assert PfaffianParlettReid._pfaffian_adjugate(torch.zeros(0, 6, 6)).shape == (0, 6, 6)
+
+    @staticmethod
+    def _forbid_minors(monkeypatch):
+        def _fail(matrices):
+            raise AssertionError("the minor Pfaffians must not be used here")
+
+        monkeypatch.setattr(PfaffianParlettReid, "_pfaffian_adjugate", staticmethod(_fail))
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.complex64, torch.complex128])
+    @pytest.mark.parametrize("dimension", [6, 8, 16])
+    def test_singular_adjugate_corank_two_uses_rank_two_formula(self, dimension, dtype, monkeypatch):
+        matrices = _rotated_corank(4, dimension, 2, dtype, seed=dimension)
+        expected = _loop_adjugate(matrices.to(torch.complex128 if dtype.is_complex else torch.float64))
+        self._forbid_minors(monkeypatch)
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrices)
+        assert result.dtype == dtype
+        scale = expected.abs().amax()
+        double = dtype in (torch.float64, torch.complex128)
+        atol = ATOL_MATRIX_COMPARISON if double else ATOL_SINGLE_PRECISION_COMPARISON
+        rtol = RTOL_MATRIX_COMPARISON if double else RTOL_SINGLE_PRECISION_COMPARISON
+        torch.testing.assert_close(result.to(expected.dtype) / scale, expected / scale, atol=atol, rtol=rtol)
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    @pytest.mark.parametrize("corank", [4, 6])
+    def test_singular_adjugate_corank_four_or_more_is_at_round_off_level(self, corank, dtype, monkeypatch):
+        # The true adjugate vanishes; the rank-2 formula returns round-off relative to the natural scale
+        # sigma_max^(n/2 - 1) of the adjugate, without the minors.
+        matrices = _rotated_corank(4, 8, corank, dtype, seed=corank)
+        natural = torch.linalg.svdvals(matrices)[:, 0] ** 3
+        self._forbid_minors(monkeypatch)
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrices)
+        relative = result.abs().amax(dim=(-2, -1)) / natural
+        assert torch.all(relative <= 8 * torch.finfo(dtype).eps)
+
+    def test_singular_adjugate_keeps_exact_minors_for_wide_dynamic_range(self):
+        # Invertible block-diagonal matrix whose blocks span 16 orders of magnitude: its small singular values
+        # are genuine, so neither shortcut applies and the exact minors give the true adjugate pf A^{-1}.
+        scales = [1e8, 1e-8, 1e6, 1e-6]
+        matrix = torch.zeros(8, 8, dtype=torch.float64)
+        for index, scale in enumerate(scales):
+            matrix[2 * index, 2 * index + 1], matrix[2 * index + 1, 2 * index] = scale, -scale
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrix[None])[0]
+        expected = PfaffianParlettReid.forward(matrix) * torch.linalg.inv(matrix)
+        torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_singular_adjugate_mixed_batch_routes_each_element(self, monkeypatch):
+        corank_two = _rotated_corank(2, 8, 2, torch.float64, seed=30)
+        corank_four = _rotated_corank(1, 8, 4, torch.float64, seed=31)
+        with_nan = _rotated_corank(1, 8, 2, torch.float64, seed=32)
+        with_nan[0, 0, 1] = float("nan")
+        matrices = torch.cat([corank_two, corank_four, with_nan])
+        calls = []
+        original = PfaffianParlettReid._pfaffian_adjugate
+
+        def _recording(matrices_subset):
+            calls.append(matrices_subset.shape[0])
+            return original(matrices_subset)
+
+        monkeypatch.setattr(PfaffianParlettReid, "_pfaffian_adjugate", staticmethod(_recording))
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrices)
+        assert calls == [1]  # only the non-finite element takes the minors
+        torch.testing.assert_close(
+            result[:2], _loop_adjugate(corank_two), atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_APPROX_COMPARISON
+        )
+        natural = torch.linalg.svdvals(corank_four[0])[0] ** 3
+        assert result[2].abs().amax() <= 8 * torch.finfo(torch.float64).eps * natural
+        torch.testing.assert_close(result[3], _loop_adjugate(with_nan)[0], equal_nan=True)
+
+    def test_singular_adjugate_falls_back_when_svd_fails(self, monkeypatch):
+        def _no_convergence(*args, **kwargs):
+            raise torch.linalg.LinAlgError("SVD did not converge")
+
+        matrices = _rotated_corank(2, 8, 2, torch.float64, seed=33)
+        monkeypatch.setattr(torch.linalg, "svd", _no_convergence)
+        torch.testing.assert_close(PfaffianParlettReid._singular_pfaffian_adjugate(matrices), _loop_adjugate(matrices))
+
+    @pytest.mark.parametrize(("dimension", "expected_zero"), [(5, True), (4, False), (2, False)])
+    def test_singular_adjugate_small_and_odd_dimensions(self, dimension, expected_zero):
+        entries = torch.randn(2, dimension, dimension, dtype=torch.float64, generator=torch.Generator().manual_seed(34))
+        matrices = entries - entries.mT
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrices)
+        if expected_zero:
+            assert torch.all(result == 0)
+        else:
+            torch.testing.assert_close(result, _loop_adjugate(matrices))
+        assert PfaffianParlettReid._singular_pfaffian_adjugate(matrices[:0]).shape == (0, dimension, dimension)
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    def test_grad_matrix_sync_free_zeroes_round_off_singular_elements(self, dtype, monkeypatch):
+        # Regression for issue #20: the sync-free mode only tested pf == 0, so a round-off Pfaffian got
+        # pf * A^{-1} (noise times a huge inverse, up to 3e2 or NaN). It now uses the exact mode's flags.
+        monkeypatch.setattr(PfaffianParlettReid, "EXACT_SINGULAR_GRAD", False)
+        singular = _rotated_corank(3, 8, 2, dtype, seed=35)
+        regular = _rotated_corank(1, 8, 0, dtype, seed=36)
+        matrix = torch.cat([singular, regular])
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        assert torch.any(pfaffian[:3] != 0)  # at least one round-off Pfaffian, not an exact zero
+        grad_output = torch.ones(4, dtype=dtype)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)
+        assert torch.all(result[:3] == 0)
+        expected = 0.5 * (pfaffian[3] * torch.linalg.inv(matrix[3])).transpose(-1, -2).conj()
+        torch.testing.assert_close(result[3], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    def test_signed_backward_on_singular_batch_matches_minor_definition(self, dtype):
+        # End to end: the gradient of the signed Pfaffian on corank-2 and corank-4 elements equals the one from
+        # the minor-by-minor adjugate.
+        matrix = torch.cat([_rotated_corank(2, 10, 2, dtype, seed=37), _rotated_corank(1, 10, 4, dtype, seed=38)])
+        leaf = matrix.clone().requires_grad_(True)
+        PfaffianParlettReid.apply(leaf).real.sum().backward()
+        expected = 0.5 * _loop_adjugate(matrix).transpose(-1, -2).conj()
+        scale = expected.abs().amax()
+        torch.testing.assert_close(
+            leaf.grad / scale, expected / scale, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    @pytest.mark.parametrize("coefficients", [[0.0, 1e10, 1e10, 1e-8], [0.0, 1.0, 1.0, 1e-15]])
+    def test_singular_adjugate_is_exact_on_structured_inputs(self, coefficients):
+        # Regression: setting the adjugate to zero at corank >= 4 lost the exact gradient of block-diagonal
+        # inputs with one zero block and one block below the round-off level (5e11 for the first one).
+        matrix = torch.zeros(8, 8, dtype=torch.float64)
+        for index, coefficient in enumerate(coefficients):
+            matrix[2 * index, 2 * index + 1], matrix[2 * index + 1, 2 * index] = coefficient, -coefficient
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrix[None])[0]
+        expected = _loop_adjugate(matrix[None])[0]
+        scale = expected.abs().amax()
+        assert scale > 0
+        torch.testing.assert_close(
+            result / scale, expected / scale, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    def test_rank_two_adjugate_does_not_overflow_near_the_float_range(self):
+        # Regression: entry / wedge_best (|wedge_best| < 1) overflowed although every adjugate entry is at most
+        # |entry|; here the true entries reach 1.6e308 and |wedge_best| = 0.52, so entry / wedge_best overflows.
+        matrices = _rotated_corank(1, 6, 2, torch.float64, seed=40) * 10.0**154.19
+        expected = _loop_adjugate(matrices)
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrices)
+        assert torch.isfinite(expected).all() and torch.isfinite(result).all()
+        scale = expected.abs().amax()
+        torch.testing.assert_close(
+            result / scale, expected / scale, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    def test_backward_uses_the_singular_adjugate(self, monkeypatch):
+        calls = []
+        original = PfaffianParlettReid._singular_pfaffian_adjugate
+
+        def _recording(matrices):
+            calls.append(matrices.shape[0])
+            return original(matrices)
+
+        monkeypatch.setattr(PfaffianParlettReid, "_singular_pfaffian_adjugate", staticmethod(_recording))
+        singular = _rotated_corank(2, 8, 2, torch.float64, seed=41)
+        regular = _rotated_corank(3, 8, 0, torch.float64, seed=42)
+        leaf = torch.cat([singular, regular]).requires_grad_(True)
+        PfaffianParlettReid.apply(leaf).sum().backward()
+        assert calls == [2]  # only the two singular elements
+
+    def test_singular_adjugate_without_clear_truncation_takes_the_minors(self, monkeypatch):
+        # sigma_min / sigma_3 = 1e-10 lies between eps^0.75 (2e-12) and eps^0.5 (1.5e-8): the rank-2 truncation
+        # would be off by ~1e-10, so the exact minors must be used.
+        block = torch.zeros(8, 8, dtype=torch.float64)
+        even = torch.arange(0, 8, 2)
+        coefficients = torch.tensor([1e-10, 1.0, 1.0, 1.0], dtype=torch.float64)
+        block[even, even + 1], block[even + 1, even] = coefficients, -coefficients
+        generator = torch.Generator().manual_seed(44)
+        rotation, _ = torch.linalg.qr(torch.randn(8, 8, dtype=torch.float64, generator=generator))
+        matrices = (rotation.T @ block @ rotation)[None]
+        calls = []
+        original = PfaffianParlettReid._pfaffian_adjugate
+
+        def _recording(subset):
+            calls.append(subset.shape[0])
+            return original(subset)
+
+        monkeypatch.setattr(PfaffianParlettReid, "_pfaffian_adjugate", staticmethod(_recording))
+        result = PfaffianParlettReid._singular_pfaffian_adjugate(matrices)
+        assert calls == [1]
+        torch.testing.assert_close(
+            result, _loop_adjugate(matrices), atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    @pytest.mark.parametrize("smallest", [1e-9, 1e-13])
+    def test_grad_matrix_sync_free_keeps_invertible_ill_conditioned_gradient(self, smallest, monkeypatch):
+        # Regression: the sync-free mode reused the exact mode's flags (residual, eps^0.75 pivot ratio) and
+        # zeroed genuinely invertible elements from cond ~1e9; only round-off level singularity is zeroed now.
+        monkeypatch.setattr(PfaffianParlettReid, "EXACT_SINGULAR_GRAD", False)
+        matrix = torch.zeros(1, 8, 8, dtype=torch.float64)
+        for index, coefficient in enumerate([smallest, 1.0, 1.0, 1.0]):
+            matrix[0, 2 * index, 2 * index + 1], matrix[0, 2 * index + 1, 2 * index] = coefficient, -coefficient
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, torch.ones(1, dtype=torch.float64))
+        torch.testing.assert_close(
+            result[0, 0, 1],
+            torch.tensor(0.5, dtype=torch.float64),
+            atol=ATOL_MATRIX_COMPARISON,
+            rtol=RTOL_MATRIX_COMPARISON,
+        )
+
+    def test_grad_matrix_sync_free_propagates_nan(self, monkeypatch):
+        monkeypatch.setattr(PfaffianParlettReid, "EXACT_SINGULAR_GRAD", False)
+        matrix = _rotated_corank(1, 8, 0, torch.float64, seed=45)
+        matrix[0, 0, 1] = float("nan")
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        result = PfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, torch.ones(1, dtype=torch.float64))
+        assert torch.isnan(result).any()
+
+    def test_sync_free_supports_double_backward(self, monkeypatch):
+        monkeypatch.setattr(PfaffianParlettReid, "EXACT_SINGULAR_GRAD", False)
+        singular = _rotated_corank(1, 6, 2, torch.float64, seed=46)
+        regular = _rotated_corank(1, 6, 0, torch.float64, seed=47)
+        leaf = torch.cat([singular, regular]).requires_grad_(True)
+        (gradient,) = torch.autograd.grad(PfaffianParlettReid.apply(leaf).sum(), leaf, create_graph=True)
+        (second,) = torch.autograd.grad(gradient.pow(2).sum(), leaf)
+        assert torch.isfinite(second).all()

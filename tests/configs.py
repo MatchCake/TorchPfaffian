@@ -21,3 +21,7 @@ def set_seed(seed: int = TEST_SEED):
     np.random.seed(seed)
     torch.random.manual_seed(TEST_SEED)
     return seed
+
+
+ATOL_SINGLE_PRECISION_COMPARISON = 1e-4
+RTOL_SINGLE_PRECISION_COMPARISON = 1e-4
