@@ -147,8 +147,8 @@ def pfaffian(
         clamped to the floor), instead of the ``O(1)`` gradient the unmasked backward derives from
         round-off. No numerical test separates such a structural zero from a genuine value at round-off
         level, so this is off by default (``False``); turn it on when exact zeros are expected, for
-        example the parity-forbidden outcomes of a basis state. The backward costs one inverse and two
-        1-norms per element.
+        example the parity-forbidden outcomes of a basis state. The backward costs one inverse, two
+        1-norms and one set of singular values per element.
         Elements whose determinant overflows are recovered in the log domain with the unmasked gradient;
         see :class:`PfaffianMaskedMagnitude` for the limits of the round-off criterion.
     :raises ValueError: If ``mask_roundoff_gradient=True`` with ``sign=True``, or if ``check_input=True``
