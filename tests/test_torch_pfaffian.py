@@ -521,7 +521,7 @@ class TestTorchPfaffian:
         orthogonal, _ = torch.linalg.qr(torch.randn(dimension, dimension, dtype=torch.float64, generator=generator))
         return (orthogonal @ block @ orthogonal.T).to(dtype)
 
-    @pytest.mark.parametrize("dimension", [4, 6, 8, 12])
+    @pytest.mark.parametrize("dimension", [4, 6, 8, 12, 16, 24])
     def test_pfaffian_mask_roundoff_gradient_zeroes_round_off_gradient_at_every_size(self, dimension):
         # The unfloored magnitude sqrt(|det A|) gives the round-off zero a garbage gradient: O(1) noise where
         # the platform's LAPACK computes a round-off determinant, NaN where it computes exactly 0 (Windows).

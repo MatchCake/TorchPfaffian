@@ -184,33 +184,92 @@ class TestPfaffianMaskedMagnitude:
 
     def test_rcond_scale_constant(self):
         assert PfaffianMaskedMagnitude.ROUNDOFF_RCOND_SCALE == 4.0
+        assert PfaffianMaskedMagnitude.ROUNDOFF_SPECTRAL_SCALE == 16.0
 
     def test_resolved_pfaffian_with_round_off_rcond_keeps_gradient(self):
-        # rcond_1 is at round-off level here but |Pf| is well above round-off relative to max|A_ij|^(m/2):
-        # the rcond test alone would mask it, so this pins the second (magnitude) criterion of the AND.
-        dimension = 12
-        generator = torch.Generator().manual_seed(6)
+        # rcond_1 is at round-off level here but sigma_min / sigma_max is not (the 1-norm ratio is 19x
+        # smaller): |Pf| is resolved, so this pins the second (spectral) criterion of the AND.
+        matrix = self._resolved_with_round_off_rcond()
+        threshold = PfaffianMaskedMagnitude.ROUNDOFF_RCOND_SCALE * torch.finfo(torch.float64).eps
+        spectral_threshold = PfaffianMaskedMagnitude.ROUNDOFF_SPECTRAL_SCALE * torch.finfo(torch.float64).eps
+        inverse = torch.linalg.inv(matrix)
+        rcond = 1.0 / (torch.linalg.matrix_norm(matrix, ord=1) * torch.linalg.matrix_norm(inverse, ord=1))
+        singular_values = torch.linalg.svdvals(matrix)
+        spectral_rcond = singular_values[-1] / singular_values[0]
+        assert 2 * rcond <= threshold and spectral_threshold <= spectral_rcond / 2  # the two tests disagree
+        leaf = matrix.clone().requires_grad_(True)
+        magnitude = PfaffianMaskedMagnitude.apply(leaf, 1e-60)
+        magnitude.backward()
+        expected = 0.5 * magnitude.detach() * inverse.transpose(-1, -2)  # the unmasked formula
+        assert leaf.grad.abs().amax() > 0
+        torch.testing.assert_close(leaf.grad, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
+    def test_nan_element_does_not_disable_spectral_test_of_neighbours(self):
+        # Regression guard: an SVD over the raw batch raises on the NaN element, and the fallback on the
+        # 1-norm test alone would then mask the resolved neighbour.
+        nan_matrix = _well_conditioned_skew((64, 64), torch.float64)
+        nan_matrix[0, 1] = float("nan")
+        matrix = torch.stack([nan_matrix, self._resolved_with_round_off_rcond()]).requires_grad_(True)
+        PfaffianMaskedMagnitude.apply(matrix, 1e-60).sum().backward()
+        assert torch.all(matrix.grad[0] == 0)
+        assert matrix.grad[1].abs().amax() > 0
+
+    @staticmethod
+    def _resolved_with_round_off_rcond() -> torch.Tensor:
+        # Corank-2 skew matrix resolved by a 6.2e-12 entry: rcond_1 ~ 1.8 eps, sigma_min / sigma_max ~ 35 eps.
+        dimension = 64
+        generator = torch.Generator().manual_seed(19)
         entries = torch.randn(dimension, dimension, dtype=torch.float64, generator=generator)
         matrix = entries - entries.T
         matrix[0], matrix[:, 0] = matrix[1].clone(), matrix[:, 1].clone()  # corank 2
-        matrix[0, 1], matrix[1, 0] = 0.0, 0.0
-        matrix[0, 2] += 1e-13  # resolve the Pfaffian slightly away from zero
-        matrix[2, 0] -= 1e-13
-        threshold = PfaffianMaskedMagnitude.ROUNDOFF_RCOND_SCALE * torch.finfo(torch.float64).eps
-        inverse = torch.linalg.inv(matrix)
-        rcond = 1.0 / (torch.linalg.matrix_norm(matrix, ord=1) * torch.linalg.matrix_norm(inverse, ord=1))
-        relative_magnitude = torch.linalg.det(matrix).abs().sqrt() / matrix.abs().amax() ** (dimension // 2)
-        assert rcond <= threshold < relative_magnitude  # the two criteria disagree on this matrix
-        leaf = matrix.clone().requires_grad_(True)
-        PfaffianMaskedMagnitude.apply(leaf, 1e-60).backward()
-        _, expected_grad = _unmasked_reference(matrix, 1e-60)
-        assert leaf.grad.abs().amax() > 0
-        # At rcond ~ eps both gradient formulas are accurate to a few percent only.
-        torch.testing.assert_close(leaf.grad, expected_grad, atol=ATOL_APPROX_COMPARISON, rtol=RTOL_APPROX_COMPARISON)
+        matrix[0, 0], matrix[0, 1], matrix[1, 0] = 0.0, 0.0, 0.0
+        matrix[0, 2] += 6.2e-12  # resolve the Pfaffian slightly away from zero
+        matrix[2, 0] -= 6.2e-12
+        assert torch.equal(matrix, -matrix.T)
+        return matrix
+
+    @pytest.mark.parametrize("dtype", _DTYPES)
+    @pytest.mark.parametrize("dimension", [12, 16, 24, 32])
+    def test_large_round_off_zero_gets_zero_gradient(self, dtype, dimension):
+        # Regression: the magnitude test compared |Pf| with max|A_ij|^(m/2), which falls behind the
+        # round-off of |Pf| as m grows (by 4e2 at m = 24), so large structural zeros kept their noise.
+        epsilon = torch.finfo(dtype).eps
+        coefficients = [0.25 * epsilon] + [10.0] * (dimension // 2 - 1)
+        matrix = torch.stack([_rotated_block_diagonal(coefficients, dtype) for _ in range(N_RANDOM_TESTS_PER_CASE)])
+        matrix.requires_grad_(True)
+        PfaffianMaskedMagnitude.apply(matrix, 1e-300 if epsilon < 1e-10 else 1e-40).sum().backward()
+        assert torch.all(matrix.grad == 0)
+
+    @pytest.mark.parametrize("dimension", [16, 24])
+    def test_round_off_zero_with_accumulated_drift_gets_zero_gradient(self, dimension):
+        # A structural zero computed through a long circuit drifts to sigma_min / sigma_max ~ 8 eps (MatchCake
+        # lookups after 1e5 in-place Givens rotations), with rcond_1 still at round-off level: an 8 eps block
+        # models it. A spectral threshold of 4 eps would keep its gradient.
+        epsilon = torch.finfo(torch.float64).eps
+        coefficients = [8.0 * epsilon] + [1.0] * (dimension // 2 - 1)
+        matrix = torch.stack(
+            [_rotated_block_diagonal(coefficients, torch.float64) for _ in range(N_RANDOM_TESTS_PER_CASE)]
+        ).requires_grad_(True)
+        PfaffianMaskedMagnitude.apply(matrix, 1e-300).sum().backward()
+        assert torch.all(matrix.grad == 0)
+
+    def test_svd_failure_falls_back_on_one_norm_test(self, monkeypatch):
+        epsilon = torch.finfo(torch.float64).eps
+        round_off = _rotated_block_diagonal([0.25 * epsilon, 1.0, 1.0], torch.float64)
+        resolved = _well_conditioned_skew((6, 6), torch.float64)
+        matrix = torch.stack([round_off, resolved]).requires_grad_(True)
+
+        def failing_svdvals(*args, **kwargs):
+            raise torch.linalg.LinAlgError("did not converge")
+
+        monkeypatch.setattr(torch.linalg, "svdvals", failing_svdvals)
+        PfaffianMaskedMagnitude.apply(matrix, 1e-60).sum().backward()
+        assert torch.all(matrix.grad[0] == 0)
+        assert matrix.grad[1].abs().amax() > 0
 
     def test_magnitude_test_alone_does_not_mask_resolved_ill_conditioned_matrix(self):
-        # rcond ~ 1e-12 is far above round-off, while |Pf| = 1e-18 is far below max|A_ij|^(m/2): only the
-        # rcond half of the AND keeps this element's gradient.
+        # rcond ~ 1e-12 is far above round-off in both norms: the 1-norm half of the AND keeps this
+        # element's gradient, although |Pf| = 1e-18 is tiny.
         matrix = _rotated_block_diagonal([1e-12, 1.0, 1e-6], torch.float64).requires_grad_(True)
         magnitude = PfaffianMaskedMagnitude.apply(matrix, 1e-60)
         magnitude.backward()
@@ -220,7 +279,7 @@ class TestPfaffianMaskedMagnitude:
 
     @pytest.mark.parametrize("scale", [1e-3, 1.0, 1e3])
     def test_mask_decision_is_invariant_to_matrix_scale(self, scale):
-        # The magnitude test compares |Pf| with max|A_ij|^(m/2): both scale as s^(m/2) under A -> s A.
+        # Both tests are ratios of norms, unchanged under A -> s A.
         epsilon = torch.finfo(torch.float64).eps
         round_off = (scale * _rotated_block_diagonal([0.25 * epsilon, 1.0, 1.0], torch.float64)).requires_grad_(True)
         resolved = (scale * _rotated_block_diagonal([1e-12, 1.0, 1e-6], torch.float64)).requires_grad_(True)
