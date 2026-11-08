@@ -99,7 +99,11 @@ class TestPfaffianMaskedMagnitude:
         magnitude.sum().backward()
         expected_value, expected_grad = _unmasked_reference(matrix, floor)
         torch.testing.assert_close(magnitude, expected_value)  # the forward is unchanged
-        assert expected_grad[0].abs().amax() > ATOL_APPROX_COMPARISON  # the unmasked gradient leaks
+        # Without the mask (and without a floor) the gradient is garbage: O(1) noise, or NaN where the
+        # platform's LAPACK computes the round-off determinant as exactly 0.
+        leaf = round_off.detach().clone().requires_grad_(True)
+        torch.sqrt(torch.abs(torch.linalg.det(leaf))).backward()
+        assert (~(leaf.grad.abs() <= ATOL_APPROX_COMPARISON)).any()
         assert torch.all(matrix.grad[0] == 0)
         torch.testing.assert_close(matrix.grad[1], expected_grad[1])
 

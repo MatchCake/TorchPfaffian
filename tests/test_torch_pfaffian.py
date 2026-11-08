@@ -523,12 +523,12 @@ class TestTorchPfaffian:
 
     @pytest.mark.parametrize("dimension", [4, 6, 8, 12])
     def test_pfaffian_mask_roundoff_gradient_zeroes_round_off_gradient_at_every_size(self, dimension):
-        # The unfloored magnitude sqrt(|det A|) gives the round-off zero an O(1) gradient whatever the size of
-        # the round-off (which depends on the platform's LAPACK, so the floored unmasked paths may already
-        # clamp it); the masked path gives zero, for small and large m.
+        # The unfloored magnitude sqrt(|det A|) gives the round-off zero a garbage gradient: O(1) noise where
+        # the platform's LAPACK computes a round-off determinant, NaN where it computes exactly 0 (Windows).
+        # The masked path gives zero, for small and large m.
         unmasked_input = self._round_off_zero(dimension).requires_grad_(True)
         torch.sqrt(torch.abs(torch.linalg.det(unmasked_input))).backward()
-        assert unmasked_input.grad.abs().amax() > ATOL_APPROX_COMPARISON
+        assert (~(unmasked_input.grad.abs() <= ATOL_APPROX_COMPARISON)).any()  # some entry is large or NaN
         masked_input = self._round_off_zero(dimension).requires_grad_(True)
         pfaffian(masked_input, sign=False, mask_roundoff_gradient=True).backward()
         assert torch.all(masked_input.grad == 0)
