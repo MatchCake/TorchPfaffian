@@ -72,6 +72,7 @@ def pfaffian(
     check_input: bool = False,
     check_finite: bool = True,
     epsilon: float | None = None,
+    mask_roundoff_gradient: bool = False,
 ) -> torch.Tensor:
     """
     Compute the Pfaffian of a skew-symmetric matrix, choosing the strategy from the input.
@@ -84,6 +85,7 @@ def pfaffian(
     ==========================================  ===========================  ==================================
     Condition                                   Strategy                     Reason
     ==========================================  ===========================  ==================================
+    ``mask_roundoff_gradient=True``             ``PfaffianMaskedMagnitude``  zero gradient at round-off zeros
     ``m <= AUTO_SMALL_MAX``                     ``PfaffianSmall``            exact unrolled kernel (all dtypes)
     block form, large input (see below)         ``PfaffianBlockDet``         one ``n x n`` determinant
     ``sign=True``, Rust built, CPU input         ``RustPfaffianParlettReid``  fastest signed path (native Rust)
@@ -133,10 +135,25 @@ def pfaffian(
         the dtype's range. This costs one device-to-host synchronization; pass ``False`` to skip both the
         check and the recovery in hot loops (the raw fast-path result, possibly ``inf``, is returned).
     :param epsilon: Only affects the magnitude path (``sign=False``). When a float is given, the
-        magnitude is computed in the log domain and floored at ``sqrt(epsilon)`` (keeping gradients
-        alive below the floor). When ``None`` (default), the routing is unchanged and the magnitude is
-        computed via ``PfaffianFDBPf`` / ``PfaffianDet`` (or ``PfaffianBlockDet`` for large block-form
-        inputs) and floored at ``sqrt(PfaffianStrategy.EPSILON)``.
+        magnitude is computed in the log domain and floored at ``sqrt(epsilon)``; elements below the
+        floor get a zero gradient. When ``None`` (default), the routing is unchanged and the magnitude
+        is computed via ``PfaffianFDBPf`` / ``PfaffianDet`` (or ``PfaffianBlockDet`` for large
+        block-form inputs) and floored at ``sqrt(PfaffianStrategy.EPSILON)``. With
+        ``mask_roundoff_gradient=True`` it is the per-call floor of ``|det(A)|`` (``None`` means
+        ``PfaffianStrategy.EPSILON``).
+    :param mask_roundoff_gradient: Only valid with ``sign=False``. When ``True``, every input size is
+        computed by ``PfaffianMaskedMagnitude``: the forward is ``sqrt(max(|det(A)|, epsilon))`` and the
+        backward gives a zero gradient to elements whose Pfaffian vanishes up to round-off (or that were
+        clamped to the floor), instead of the ``O(1)`` gradient the unmasked backward derives from
+        round-off. No numerical test separates such a structural zero from a genuine value at round-off
+        level, so this is off by default (``False``); turn it on when exact zeros are expected, for
+        example the parity-forbidden outcomes of a basis state. The backward costs one inverse and two
+        1-norms per element.
+        Elements whose determinant overflows are recovered in the log domain with the unmasked gradient;
+        see :class:`PfaffianMaskedMagnitude` for the limits of the round-off criterion.
+    :raises ValueError: If ``mask_roundoff_gradient=True`` with ``sign=True``, or if ``check_input=True``
+        and ``matrix`` is not square and skew-symmetric.
+    :raises TypeError: If ``mask_roundoff_gradient=True`` and ``matrix`` has no LU dtype (e.g. float16).
     :return: The Pfaffian of the input, of shape ``(...,)``.
     :rtype: torch.Tensor
     """
@@ -145,8 +162,19 @@ def pfaffian(
             raise ValueError(f"Expected a square matrix in the last two dimensions, got shape {tuple(matrix.shape)}.")
         if not torch.allclose(matrix, -matrix.transpose(-1, -2)):
             raise ValueError("Input matrix is not skew-symmetric (A != -A^T).")
+    if mask_roundoff_gradient and sign:
+        raise ValueError("mask_roundoff_gradient only applies to the magnitude path; pass sign=False.")
+    if mask_roundoff_gradient and matrix.dtype not in _BLOCK_DET_DTYPES:
+        raise TypeError(
+            f"mask_roundoff_gradient needs an LU determinant, available for float32, float64, complex64 and "
+            f"complex128; got {matrix.dtype}."
+        )
 
-    if matrix.shape[-1] <= AUTO_SMALL_MAX:
+    if mask_roundoff_gradient:
+        # Every size takes the det forward the round-off criterion is calibrated on; the small kernel's
+        # |Pf| would otherwise leak the same round-off gradient.
+        result = PfaffianMaskedMagnitude.apply(matrix, epsilon)
+    elif matrix.shape[-1] <= AUTO_SMALL_MAX:
         # The exact unrolled kernel wins in this range and is device- and dtype-agnostic.
         if sign:
             result = PfaffianSmall.apply(matrix)
@@ -192,6 +220,16 @@ def pfaffian(
         if sign:
             phase, log_abs = slog_pfaffian(matrix)
             result = phase * torch.exp(log_abs).to(phase.dtype)
+        elif mask_roundoff_gradient:
+            # Recover only the non-finite elements with a finite input, so the others keep the masked
+            # gradient. The log-domain branch sees the identity elsewhere: its backward still runs on the
+            # discarded elements, and 0 * NaN from a non-finite input would leak into their gradient.
+            needs_recovery = ~torch.isfinite(result) & torch.isfinite(matrix).all(dim=(-2, -1))
+            identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+            recovery_input = torch.where(needs_recovery[..., None, None], matrix, identity)
+            recovered = torch.exp(log_magnitude_pfaffian(recovery_input))
+            recovered = torch.clamp(recovered, min=(PfaffianStrategy.EPSILON if epsilon is None else epsilon) ** 0.5)
+            result = torch.where(needs_recovery, recovered, result)
         else:
             result = torch.exp(log_magnitude_pfaffian(matrix))
             if epsilon is not None:

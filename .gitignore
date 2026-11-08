@@ -308,3 +308,7 @@ coverage.json
 dist/*.whl
 dist/*.tar.gz
 /.claude
+
+# Benchmark outputs and build cache
+benchmarks/results/
+benchmarks/.cache/

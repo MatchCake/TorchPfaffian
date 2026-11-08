@@ -17,7 +17,13 @@ from tests.configs import (
     TEST_SEED,
 )
 from torch_pfaffian import get_pfaffian_function, pfaffian, pfaffian_strategy_map
-from torch_pfaffian.strategies import PfaffianBlockDet, PfaffianDet, PfaffianFDBPf, PfaffianParlettReid
+from torch_pfaffian.strategies import (
+    PfaffianBlockDet,
+    PfaffianDet,
+    PfaffianFDBPf,
+    PfaffianMaskedMagnitude,
+    PfaffianParlettReid,
+)
 
 
 def _cofactor_pfaffian(matrix: np.ndarray) -> complex:
@@ -504,6 +510,112 @@ class TestTorchPfaffian:
         )
         unfloored = pfaffian(matrix, sign=False)
         assert unfloored.item() < floored.item()
+
+    @staticmethod
+    def _round_off_zero(dimension: int, dtype: torch.dtype = torch.float64) -> torch.Tensor:
+        # Rotated block-diagonal skew matrix with entries of size 10 and one block at 0.25 * eps * 10: |Pf|
+        # vanishes up to round-off yet sits above the default sqrt(PfaffianStrategy.EPSILON) floor.
+        coefficients = [2.5 * torch.finfo(dtype).eps] + [10.0] * (dimension // 2 - 1)
+        block = _block_diagonal_skew(coefficients)
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        orthogonal, _ = torch.linalg.qr(torch.randn(dimension, dimension, dtype=torch.float64, generator=generator))
+        return (orthogonal @ block @ orthogonal.T).to(dtype)
+
+    @pytest.mark.parametrize("dimension", [4, 6, 8, 12])
+    def test_pfaffian_mask_roundoff_gradient_zeroes_round_off_gradient_at_every_size(self, dimension):
+        # The unfloored magnitude sqrt(|det A|) gives the round-off zero a garbage gradient: O(1) noise where
+        # the platform's LAPACK computes a round-off determinant, NaN where it computes exactly 0 (Windows).
+        # The masked path gives zero, for small and large m.
+        unmasked_input = self._round_off_zero(dimension).requires_grad_(True)
+        torch.sqrt(torch.abs(torch.linalg.det(unmasked_input))).backward()
+        assert (~(unmasked_input.grad.abs() <= ATOL_APPROX_COMPARISON)).any()  # some entry is large or NaN
+        masked_input = self._round_off_zero(dimension).requires_grad_(True)
+        pfaffian(masked_input, sign=False, mask_roundoff_gradient=True).backward()
+        assert torch.all(masked_input.grad == 0)
+
+    @pytest.mark.parametrize("dimension", [4, 8])
+    def test_pfaffian_mask_roundoff_gradient_routes_to_masked_magnitude(self, dimension):
+        matrix = self._round_off_zero(dimension)
+        with mock.patch.object(torch_pfaffian, "PfaffianMaskedMagnitude", wraps=PfaffianMaskedMagnitude) as fake:
+            pfaffian(matrix, sign=False, mask_roundoff_gradient=True, epsilon=1e-20)
+            fake.apply.assert_called_once_with(matrix, 1e-20)
+
+    def test_pfaffian_mask_roundoff_gradient_routes_block_form_to_masked_magnitude(self):
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        matrix = _block_antidiagonal(torch.randn(256, 4, 4, dtype=torch.float64, generator=generator))
+        with mock.patch.object(torch_pfaffian, "PfaffianBlockDet", wraps=PfaffianBlockDet) as fake:
+            pfaffian(matrix, sign=False, mask_roundoff_gradient=True)
+            fake.apply.assert_not_called()
+
+    def test_pfaffian_mask_roundoff_gradient_with_sign_raises(self):
+        with pytest.raises(ValueError, match="sign=False"):
+            pfaffian(self._round_off_zero(4), sign=True, mask_roundoff_gradient=True)
+
+    def test_pfaffian_mask_roundoff_gradient_uses_epsilon_floor(self):
+        matrix = torch.zeros(8, 8, dtype=torch.float64)
+        result = pfaffian(matrix, sign=False, mask_roundoff_gradient=True, epsilon=1e-32)
+        torch.testing.assert_close(
+            result, torch.tensor(1e-16, dtype=torch.float64), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+
+    def test_pfaffian_mask_roundoff_gradient_keeps_mask_when_another_element_overflows(self):
+        # Regression: the check_finite recovery replaced the whole batch's graph by the unmasked log-domain
+        # one when any element overflowed, so the round-off zero next to it got its O(1) gradient back.
+        overflow = _block_diagonal_skew([1e200, 1e200, 1e-200, 1e-200])  # true |Pf| = 1, det overflows
+        matrix = torch.stack([self._round_off_zero(8), overflow]).requires_grad_(True)
+        result = pfaffian(matrix, sign=False, mask_roundoff_gradient=True)
+        torch.testing.assert_close(
+            result[1], torch.tensor(1.0, dtype=torch.float64), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+        result.sum().backward()
+        assert torch.isfinite(matrix.grad).all()
+        assert torch.all(matrix.grad[0] == 0)
+
+    def test_pfaffian_mask_roundoff_gradient_nan_element_keeps_neighbour_gradient(self):
+        neighbour = _block_diagonal_skew([2.0, 3.0, 4.0, 5.0])
+        nan_matrix = neighbour.clone()
+        nan_matrix[0, 1] = float("nan")
+        matrix = torch.stack([nan_matrix, neighbour, self._round_off_zero(8)]).requires_grad_(True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            pfaffian(matrix, sign=False, mask_roundoff_gradient=True).sum().backward()
+        assert torch.isfinite(matrix.grad).all()
+        expected = 0.5 * 120.0 * torch.linalg.inv(neighbour).transpose(-1, -2)
+        torch.testing.assert_close(matrix.grad[1], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+        assert torch.all(matrix.grad[2] == 0)
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf")])
+    def test_pfaffian_mask_roundoff_gradient_non_finite_input_gets_finite_gradient(self, dtype, bad_value):
+        # Regression: the log-domain recovery ran its backward on the discarded non-finite elements too,
+        # so 0 * NaN reached their gradient even when their output was unused.
+        regular = _block_diagonal_skew([2.0, 3.0, 4.0, 5.0]).to(dtype)
+        bad = regular.clone()
+        bad[0, 1] = bad_value
+        matrix = torch.stack([regular, bad]).requires_grad_(True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            result = pfaffian(matrix, sign=False, mask_roundoff_gradient=True)
+        (gradient,) = torch.autograd.grad(result[0], matrix)
+        assert torch.isfinite(gradient).all()
+        assert torch.all(gradient[1] == 0)
+
+    def test_pfaffian_mask_roundoff_gradient_recovered_element_below_floor_is_floored(self):
+        # An overflowing determinant whose true |Pf| (1e-40) is below the default floor: the recovery must
+        # apply the same sqrt(PfaffianStrategy.EPSILON) floor, with a zero gradient.
+        overflow = _block_diagonal_skew([1e200, 1e-120, 1e-120])
+        matrix = torch.stack([overflow, _block_diagonal_skew([1.0, 2.0, 3.0])]).requires_grad_(True)
+        result = pfaffian(matrix, sign=False, mask_roundoff_gradient=True)
+        result.sum().backward()
+        floor = torch.tensor(PfaffianDet.EPSILON**0.5, dtype=torch.float64)
+        torch.testing.assert_close(result[0], floor, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
+        assert torch.all(matrix.grad[0] == 0)
+        assert matrix.grad[1].abs().amax() > 0
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.int64])
+    def test_pfaffian_mask_roundoff_gradient_rejects_dtype_without_lu(self, dtype):
+        with pytest.raises(TypeError, match="LU determinant"):
+            pfaffian(torch.zeros(4, 4, dtype=dtype), sign=False, mask_roundoff_gradient=True)
 
     def test_pfaffian_epsilon_none_matches_default_magnitude(self):
         rng = np.random.default_rng(TEST_SEED)
