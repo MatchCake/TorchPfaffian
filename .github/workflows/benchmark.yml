@@ -1,0 +1,55 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches: [ "*" ]
+
+permissions:
+  contents: read
+
+jobs:
+  Benchmark-against-base:
+    name: Benchmark against the base branch (small)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the baseline is built from the base branch history
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.2"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: |
+          uv venv .venv
+          uv sync --locked --dev --extra cpu
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Test the benchmark tooling
+        run: uv run pytest benchmarks/tests -o addopts=""
+      - name: Compare speed and memory with the base branch
+        id: benchmark
+        # Shared runners are noisy: a regression is reported as a warning with the command to confirm it
+        # locally, and never fails the pull request.
+        continue-on-error: true
+        run: >-
+          uv run python benchmarks/compare.py
+          --bench small
+          --cuda false
+          --baseline origin/${{ github.base_ref }}
+          --github
+      - name: Warn when the benchmark could not run
+        if: steps.benchmark.outcome == 'failure'
+        run: >-
+          echo "::warning title=Benchmark did not run::compare.py failed (see the step log). Run
+          python benchmarks/compare.py --baseline origin/${{ github.base_ref }} locally."
+      - name: Upload the full benchmark table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/results/
+          if-no-files-found: ignore
+          retention-days: 14
