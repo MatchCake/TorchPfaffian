@@ -112,7 +112,10 @@ class PfaffianBlockDet(PfaffianStrategy):
         misses it). Flagging a well-conditioned block only costs speed, never accuracy. Flagged blocks
         whose ``grad_output`` is exactly zero get a zero gradient without the exact path, since the
         gradient is linear in ``grad_output``. With :attr:`EXACT_SINGULAR_GRAD` set to ``False`` the
-        backward is host-synchronization-free and blocks with ``pf == 0`` get a zero gradient.
+        backward is host-synchronization-free and blocks singular at round-off level (see
+        :meth:`PfaffianStrategy._round_off_inverse`) get a zero gradient. That test is an LU pivot ratio
+        below ``n * eps``, so an invertible but strongly graded block (for example ``diag(1, 1e-9)`` in
+        ``float32``) is also given a zero gradient: this mode trades accuracy for speed.
 
         The Pfaffian is holomorphic in the entries of ``A``, so for complex inputs the backward returns the
         conjugate of the analytic derivative times ``grad_output``, which is PyTorch's Wirtinger convention.
@@ -133,13 +136,14 @@ class PfaffianBlockDet(PfaffianStrategy):
         block = matrix[..., :n, n:]  # (..., n, n) upper-right block
         constant = (-1) ** (n * (n - 1) // 2)
         if not PfaffianBlockDet.EXACT_SINGULAR_GRAD:
-            # Sync-free path: multiplying the inverse by pf zeroes the gradient at singular blocks
-            # (pf == 0) exactly, so no host branch runs.
-            identity = torch.eye(n, dtype=matrix.dtype, device=matrix.device).expand_as(block)
-            singular = pf == 0
-            safe_block = torch.where(singular[..., None, None], identity, block)
-            inverse, _ = torch.linalg.inv_ex(safe_block)
-            adjugate_transpose = pf[..., None, None] * inverse.transpose(-1, -2)  # zero where pf == 0
+            # Sync-free path: blocks singular at round-off level (an LU pivot ratio at most n * eps, a zero
+            # pivot, or pf == 0) get a zero gradient; testing pf == 0 alone would give a round-off det times
+            # a huge inverse. No host branch runs.
+            inverse, round_off = PfaffianBlockDet._round_off_inverse(block, pf)
+            adjugate_transpose = pf[..., None, None] * inverse.transpose(-1, -2)
+            adjugate_transpose = torch.where(
+                round_off[..., None, None], torch.zeros_like(adjugate_transpose), adjugate_transpose
+            )
             return PfaffianBlockDet._skew_split_grad(matrix, grad_output, adjugate_transpose), None
         inverse, rank_flag, residual_flag = PfaffianBlockDet._flagged_inverse(block)
         singular = rank_flag | residual_flag | (pf == 0)  # pf == 0 also catches an underflowed det
