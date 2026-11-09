@@ -63,9 +63,9 @@ def small_pfaffian(matrix: torch.Tensor) -> torch.Tensor:
         # gradient instead of raising on a fresh constant with no grad_fn. Summing an empty slice
         # (rather than the whole matrix times 0) keeps this inf/nan-safe: the odd-dim Pfaffian is 0
         # regardless of the entries, so non-finite entries must not contaminate the result.
-        return matrix.reshape(*matrix.shape[:-2], -1)[..., :0].sum(-1)
+        return matrix.flatten(-2)[..., :0].sum(-1)
     if dimension == 0:
-        return matrix.reshape(*matrix.shape[:-2], -1)[..., :0].sum(-1) + 1  # pf of a 0x0 matrix is 1
+        return matrix.flatten(-2)[..., :0].sum(-1) + 1  # pf of a 0x0 matrix is 1
     if dimension == 2:
         return matrix[..., 0, 1]
     if dimension > SMALL_N_MAX:
@@ -79,4 +79,7 @@ def small_pfaffian(matrix: torch.Tensor) -> torch.Tensor:
     product = factors[..., 0]
     for factor_index in range(1, dimension // 2):
         product = product * factors[..., factor_index]
+    if matrix.dtype in (torch.float16, torch.bfloat16):
+        # Older PyTorch (2.1) has no half-precision dot product on CPU; the elementwise sum works everywhere.
+        return (product * sign_vector).sum(dim=-1)
     return product @ sign_vector

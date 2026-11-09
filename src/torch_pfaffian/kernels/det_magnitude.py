@@ -57,7 +57,7 @@ def log_magnitude_pfaffian(matrix: torch.Tensor) -> torch.Tensor:
     if matrix.shape[-1] % 2 == 1:
         batch_shape = matrix.shape[:-2]
         real_dtype = matrix.real.dtype if matrix.dtype.is_complex else matrix.dtype
-        connected_zero = matrix.reshape(*batch_shape, -1)[..., :0].sum(-1)  # value 0, grad_fn, entries unread
+        connected_zero = matrix.flatten(-2)[..., :0].sum(-1)  # value 0, grad_fn, entries unread
         if matrix.dtype.is_complex:
             connected_zero = connected_zero.real
         return connected_zero + torch.full(batch_shape, -torch.inf, dtype=real_dtype, device=matrix.device)

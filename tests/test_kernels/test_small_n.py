@@ -125,3 +125,11 @@ class TestSmallN:
         assert matrix.grad is not None
         assert torch.isfinite(matrix.grad).all()
         assert torch.all(matrix.grad == 0)
+
+    @pytest.mark.parametrize("dimension", [0, 1, 3, 5])
+    def test_empty_batch_of_trivial_dimension_returns_empty_result(self, dimension):
+        matrix = torch.zeros(0, dimension, dimension, dtype=torch.float64, requires_grad=True)
+        result = small_pfaffian(matrix)
+        assert result.shape == (0,)
+        result.sum().backward()
+        assert matrix.grad is not None and matrix.grad.shape == matrix.shape
