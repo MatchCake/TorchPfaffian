@@ -189,7 +189,7 @@ class PfaffianStrategy(torch.autograd.Function):
             pivot_magnitude = factors.diagonal(dim1=-2, dim2=-1).abs()  # (..., k) |U_ii|
             threshold = size * torch.finfo(matrix.dtype).eps * pivot_magnitude.amax(dim=-1)
             singular = (info != 0) | ~(pivot_magnitude.amin(dim=-1) > threshold) | (pfaffian == 0)
-            singular = singular & torch.isfinite(matrix).all(dim=(-2, -1))  # NaN and inf propagate
+            singular = singular & torch.isfinite(matrix).flatten(-2).all(dim=-1)  # NaN and inf propagate
             identity_pivots = torch.arange(1, size + 1, dtype=pivots.dtype, device=pivots.device)
             safe_factors = torch.where(singular[..., None, None], identity, factors)
             safe_pivots = torch.where(singular[..., None], identity_pivots.expand_as(pivots), pivots)
@@ -288,7 +288,7 @@ class PfaffianStrategy(torch.autograd.Function):
         if dimension <= 4:
             return cls._pfaffian_adjugate(matrices)  # at most 6 tiny minors: the exact path is cheapest
         adjugate = torch.zeros_like(matrices)
-        finite = torch.isfinite(matrices).all(dim=(-2, -1))  # (m,)
+        finite = torch.isfinite(matrices).flatten(-2).all(dim=-1)  # (m,)
         identity = torch.eye(dimension, dtype=matrices.dtype, device=matrices.device).expand_as(matrices)
         try:
             _, singular_values, right_adjoint = torch.linalg.svd(
