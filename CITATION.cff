@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use TorchPfaffian in your research, please cite it using these metadata."
+type: software
+title: "TorchPfaffian"
+abstract: >-
+  Batched, differentiable Pfaffians of skew-symmetric matrices in PyTorch, on CPU and GPU, with exact
+  gradients at singular matrices and a native Rust kernel.
+authors:
+  - family-names: Gince
+    given-names: Jérémie
+    email: jeremie.gince@usherbrooke.ca
+doi: 10.5281/zenodo.24085345
+license: Apache-2.0
+repository-code: "https://github.com/MatchCake/TorchPfaffian"
+url: "https://matchcake.github.io/TorchPfaffian/"
+keywords:
+  - pfaffian
+  - skew-symmetric matrices
+  - pytorch
+  - automatic differentiation
+  - gpu
+  - free fermions
+  - matchgates

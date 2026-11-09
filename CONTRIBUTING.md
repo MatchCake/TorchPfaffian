@@ -16,7 +16,7 @@ python -c "import torch, torch_pfaffian; print(torch_pfaffian.__version__, torch
 
 Ask usage questions in an [issue](https://github.com/MatchCake/TorchPfaffian/issues/new/choose) as well;
 they are answered there and help the next person with the same question. You can also write to the
-maintainer at gincejeremie@gmail.com.
+maintainer at jeremie.gince@usherbrooke.ca.
 
 ## Setting up a development environment
 

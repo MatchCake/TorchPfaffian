@@ -5,7 +5,7 @@ TorchPfaffian computes batched, differentiable Pfaffians of skew-symmetric matri
 import importlib.metadata
 
 __author__ = "Jérémie Gince"
-__email__ = "gincejeremie@gmail.com"
+__email__ = "jeremie.gince@usherbrooke.ca"
 __copyright__ = "Copyright 2024, Jérémie Gince"
 __license__ = "Apache 2.0"
 __url__ = "https://github.com/MatchCake/TorchPfaffian"

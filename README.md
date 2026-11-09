@@ -6,6 +6,7 @@
 [![downloads](https://img.shields.io/pypi/dm/torchpfaffian)](https://pypi.org/project/torchpfaffian)
 [![PyPI version](https://img.shields.io/pypi/v/torchpfaffian)](https://pypi.org/project/torchpfaffian)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/MatchCake/TorchPfaffian/blob/dev/LICENSE)
+[![DOI](https://zenodo.org/badge/862986060.svg)](https://doi.org/10.5281/zenodo.24085345)
 
 ![Tests Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/tests.yml/badge.svg)
 ![Dist Workflow](https://github.com/MatchCake/TorchPfaffian/actions/workflows/build_dist.yml/badge.svg)
@@ -131,11 +132,16 @@ phase, log_abs = slog_pfaffian(matrix.detach())  # log domain, never overflows
 [Apache License 2.0](https://github.com/MatchCake/TorchPfaffian/blob/dev/LICENSE)
 
 ## Citation
-If you use TorchPfaffian in your research, please cite the repository:
+If you use TorchPfaffian in your research, please cite it:
 ```
-@software{torchpfaffian_Gince,
-  title={{TorchPfaffian}: {PyTorch}-based {P}faffian computation},
-  author={Gince, Jérémie},
-  url={https://github.com/MatchCake/TorchPfaffian},
+@software{gince_torchpfaffian,
+  author    = {Jérémie Gince},
+  title     = {{TorchPfaffian}},
+  publisher = {Zenodo},
+  year      = {2026},
+  doi       = {10.5281/zenodo.24085345},
+  url       = {https://doi.org/10.5281/zenodo.24085345},
 }
 ```
+This DOI always resolves to the latest version. To cite the exact version you used, take its DOI and BibTeX
+entry from the [Zenodo record](https://doi.org/10.5281/zenodo.24085345).

@@ -2,7 +2,7 @@
 name = "torchpfaffian"
 version = "0.0.6"
 description = "PyTorch-based Pfaffian computation for skew-symmetric matrices."
-authors = [{ name = "Jérémie Gince", email = "gincejeremie@gmail.com" }]
+authors = [{ name = "Jérémie Gince", email = "jeremie.gince@usherbrooke.ca" }]
 requires-python = ">=3.10,<3.15"
 license = { file = "LICENSE" }
 classifiers = [
