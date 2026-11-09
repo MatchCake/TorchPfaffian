@@ -17,7 +17,8 @@
 # Description
 
 TorchPfaffian computes the Pfaffian of batches of skew-symmetric matrices in PyTorch, with exact gradients
-on CPU and GPU, in float32, float64, complex64 and complex128.
+on CPU and GPU, in float32, float64, complex64 and complex128 (float16 and bfloat16 inputs are computed in
+float32).
 
 ## Statement of need
 
@@ -113,7 +114,7 @@ phase, log_abs = slog_pfaffian(matrix.detach())  # log domain, never overflows
 # Important Links
 - Documentation: [https://matchcake.github.io/TorchPfaffian/](https://matchcake.github.io/TorchPfaffian/).
 - Source: [https://github.com/MatchCake/TorchPfaffian/](https://github.com/MatchCake/TorchPfaffian/).
-- Known limitations (half precision, `torch.func`, thread count): [limitations](https://matchcake.github.io/TorchPfaffian/limitations.html).
+- Known limitations (`torch.func`, thread count, half precision): [limitations](https://matchcake.github.io/TorchPfaffian/limitations.html).
 - Changes between versions: [CHANGELOG.md](https://github.com/MatchCake/TorchPfaffian/blob/dev/CHANGELOG.md).
 
 # Found a bug, have a question or a feature request?

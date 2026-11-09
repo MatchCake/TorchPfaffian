@@ -14,21 +14,21 @@ non-skew input gives a meaningless result without an error. Pass ``check_input=T
 Half precision (``float16``, ``bfloat16``)
 ------------------------------------------
 
-Matrices with ``m <= 6`` (``AUTO_SMALL_MAX``) use an exact unrolled kernel that supports every dtype,
-gradients included. For larger matrices:
+PyTorch has no LU factorization in half precision, and every path beyond the unrolled kernel for
+``m <= 6`` needs one. :func:`~torch_pfaffian.pfaffian` therefore computes ``float16`` and ``bfloat16``
+inputs with ``m > 6`` in ``float32`` (also at smaller sizes with ``mask_roundoff_gradient=True``, or
+when the unrolled kernel's result is not finite), casts the
+result back, and emits a ``UserWarning``; :func:`~torch_pfaffian.slog_pfaffian` does the same at every
+size. Gradients flow back through the cast. Two consequences:
 
-==================================  =================================  ==================================
-Call                                ``float16``                        ``bfloat16``
-==================================  =================================  ==================================
-``pfaffian(A)``                     works (Rust float16 kernel)        ``TypeError`` (no Rust kernel)
-``pfaffian(A)`` backward            ``NotImplementedError`` (no LU)    ``TypeError``
-``pfaffian(A, sign=False)``         ``NotImplementedError`` (no LU)    ``NotImplementedError`` (no LU)
-``slog_pfaffian(A)``                works                              works
-``mask_roundoff_gradient=True``     ``TypeError``                      ``TypeError``
-==================================  =================================  ==================================
+- A Pfaffian that is finite in ``float32`` but beyond the range of the input dtype (above 65504 in
+  ``float16``) becomes ``inf``, with a ``RuntimeWarning`` when ``check_finite=True``. Use
+  :func:`~torch_pfaffian.slog_pfaffian` for such inputs.
+- With ``mask_roundoff_gradient=True``, the round-off criterion uses the ``float32`` precision. A
+  Pfaffian that is zero only up to the round-off of an earlier half-precision computation is not masked.
 
-PyTorch has no LU factorization in half precision on CPU, and the determinant- and inverse-based paths
-need one. Cast to ``float32`` before the call, and back afterwards if needed.
+Pass ``float32`` inputs to avoid the warning. The strategies called directly (for example
+``RustPfaffianParlettReid.apply``) do not upcast.
 
 ``torch.func`` transforms
 -------------------------

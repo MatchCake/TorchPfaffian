@@ -21,6 +21,12 @@ changes the package's behaviour, API, documentation or packaging.
 
 ### Changed
 
+- `pfaffian()` and `slog_pfaffian()` compute `float16` and `bfloat16` inputs in `float32` and cast the
+  result back, with a `UserWarning`: PyTorch's linear algebra does not support those dtypes. Before, every
+  backward, the magnitude path and the `bfloat16` signed path failed for `m > 6`, and the `slog_pfaffian`
+  backward failed at every size. The `float16` signed forward for `m > 6`, which ran natively, is now
+  computed in `float32` too, which is more accurate. Inputs with `m <= 6` still run natively, unless the
+  result is not finite or `mask_roundoff_gradient=True`.
 - CI: macOS arm64 tests (Python 3.10 and 3.14), mypy is blocking, the tutorial notebook runs on every pull request, the documentation is built
   with warnings as errors on every pull request, and the GitHub Actions run on Node 24.
 
@@ -34,6 +40,8 @@ changes the package's behaviour, API, documentation or packaging.
 - The singular-matrix detection in the backward no longer depends on the scale of the input (#24).
 - The documentation index no longer includes the README twice.
 - The routing table in the `pfaffian()` docstring did not render.
+- The release workflow built the macOS wheel on the retired `macos-14` runner. It now uses
+  `macos-latest` and targets macOS 11.0 or newer.
 
 ## [0.0.5] - 2026-07-13
 
