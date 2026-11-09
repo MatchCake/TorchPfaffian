@@ -67,6 +67,25 @@ locally, because shared runners are noisy; so does a run that could not complete
 
 The tests of the tool itself run with `python -m pytest -o addopts="" benchmarks/tests`.
 
+## Comparison with pfapack
+
+`pfapack_comparison.py` times TorchPfaffian against [pfapack](https://github.com/basnijholt/pfapack), the
+reference Pfaffian library, and checks that both agree. It uses random matrices from the `general` family
+of `cases.py`, in float64 and complex128. pfapack is not a dependency of the project, and it ships wheels
+only for some Python versions, so run it from a separate environment, outside the repository:
+
+```bash
+uv venv --python 3.12 ~/.venvs/pfapack                       # pfapack has wheels up to Python 3.13
+uv pip install --python ~/.venvs/pfapack torch --index-url https://download.pytorch.org/whl/cpu
+uv pip install --python ~/.venvs/pfapack pfapack .            # builds this package, Rust kernel included
+~/.venvs/pfapack/bin/python benchmarks/pfapack_comparison.py --threads 1
+~/.venvs/pfapack/bin/python benchmarks/pfapack_comparison.py --threads 8 --sizes 32 128
+```
+
+It prints a Markdown table with the time per matrix, the speed-up over pfapack's C implementation, and the
+largest relative difference from it. The raw records go to `benchmarks/results/pfapack-<timestamp>.json`.
+The documentation's performance page shows a run of it. Without pfapack, only TorchPfaffian is timed.
+
 ## Adding cases
 
 Add a matrix family to `FAMILIES` in `cases.py` (for example the input of a bug you just fixed), or a size to

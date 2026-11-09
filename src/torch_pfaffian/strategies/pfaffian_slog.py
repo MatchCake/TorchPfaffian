@@ -56,6 +56,9 @@ class SlogPfaffianStrategy(torch.autograd.Function):
         singular = phase == 0
         identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device)
         safe_matrix = torch.where(singular[..., None, None], identity, matrix)
-        inverse_transposed_conj = torch.linalg.inv(safe_matrix).conj().transpose(-1, -2)
+        # inv_ex never raises: an element left singular (a non-finite entry, which phase == 0 does not flag)
+        # gets a non-finite gradient instead of failing the whole batch.
+        inverse, _ = torch.linalg.inv_ex(safe_matrix)
+        inverse_transposed_conj = inverse.conj().transpose(-1, -2)
         grad = 0.5 * grad_log_abs[..., None, None] * inverse_transposed_conj
         return torch.where(singular[..., None, None], torch.zeros_like(grad), grad)

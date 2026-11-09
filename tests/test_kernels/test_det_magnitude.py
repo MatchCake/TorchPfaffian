@@ -144,3 +144,10 @@ class TestDetMagnitude:
         assert not torch.isnan(batch.grad).any()
         assert torch.isfinite(batch.grad).all()
         assert torch.all(batch.grad[1] == 0)
+
+    def test_odd_dimension_empty_batch_returns_empty_result(self):
+        matrix = torch.zeros(2, 0, 7, 7, dtype=torch.complex128, requires_grad=True)
+        result = log_magnitude_pfaffian(matrix)
+        assert result.shape == (2, 0) and result.dtype == torch.float64
+        result.sum().backward()
+        assert matrix.grad is not None and matrix.grad.shape == matrix.shape

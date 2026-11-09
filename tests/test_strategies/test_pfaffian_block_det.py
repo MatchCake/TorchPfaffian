@@ -286,6 +286,39 @@ class TestPfaffianBlockDet:
             matrix.grad[1, 3:, :3], -expected.T, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
         )
 
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    def test_exact_singular_grad_false_zeroes_round_off_singular_block(self, dtype, monkeypatch):
+        # A rank-deficient block built by rotations has a round-off det (not 0), so testing pf == 0 alone gave
+        # det * B^{-1}, round-off times a huge inverse. The sync-free mode now uses the LU pivot ratio too.
+        monkeypatch.setattr(PfaffianBlockDet, "EXACT_SINGULAR_GRAD", False)
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        size = 8
+        left, _ = torch.linalg.qr(torch.randn(size, size, dtype=dtype, generator=generator))
+        right, _ = torch.linalg.qr(torch.randn(size, size, dtype=dtype, generator=generator))
+        singular_values = torch.linspace(0.5, 1.5, size, dtype=torch.float64)
+        singular_values[0] = 0.0
+        singular_block = (left * singular_values.to(dtype)) @ right.mH
+        invertible_block = torch.eye(size, dtype=dtype) + 0.1 * torch.randn(
+            size, size, dtype=dtype, generator=generator
+        )
+        matrix = torch.stack(
+            [_block_antidiagonal_torch(singular_block), _block_antidiagonal_torch(invertible_block)]
+        ).requires_grad_(True)
+        pf = PfaffianBlockDet.apply(matrix)
+        assert pf[0] != 0  # a round-off determinant, not an exact zero
+        pf.real.sum().backward()
+        assert matrix.grad is not None
+        assert torch.all(matrix.grad[0] == 0)
+        constant = (-1) ** (size * (size - 1) // 2)
+        expected = (
+            0.5
+            * constant
+            * (torch.linalg.det(invertible_block) * torch.linalg.inv(invertible_block).transpose(-1, -2)).conj()
+        )
+        torch.testing.assert_close(
+            matrix.grad[1, :size, size:], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
     def test_adjugate_override_delegates_to_parlett_reid(self):
         # PfaffianBlockDet.forward is block-only, so its adjugate must defer to the general strategy.
         from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid
