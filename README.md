@@ -17,8 +17,8 @@
 # Description
 
 TorchPfaffian computes the Pfaffian of batches of skew-symmetric matrices in PyTorch, with exact gradients
-on CPU and GPU, in float32, float64, complex64 and complex128 (float16 and bfloat16 inputs are computed in
-float32).
+on CPU and GPU, in float32, float64, complex64 and complex128 (float16, bfloat16 and complex32 inputs are
+computed in float32 or complex64).
 
 ## Statement of need
 
@@ -51,6 +51,9 @@ matchgate simulator.
 - **Round-off zeros.** `mask_roundoff_gradient=True` gives a zero gradient to Pfaffians that vanish up to
   round-off, such as parity-forbidden amplitudes.
 - **Batched and device-agnostic.** Any leading batch shape, on CPU or CUDA, with a native Rust kernel on CPU.
+  On CPU it is faster than pfapack's C implementation on batches of small matrices, and on batches of large
+  ones with several threads; on a single matrix, pfapack is faster. See the
+  [performance](https://matchcake.github.io/TorchPfaffian/performance.html) page.
 
 ## Requirements
 
@@ -114,6 +117,9 @@ phase, log_abs = slog_pfaffian(matrix.detach())  # log domain, never overflows
 # Important Links
 - Documentation: [https://matchcake.github.io/TorchPfaffian/](https://matchcake.github.io/TorchPfaffian/).
 - Source: [https://github.com/MatchCake/TorchPfaffian/](https://github.com/MatchCake/TorchPfaffian/).
+- Tutorials: [getting started](https://matchcake.github.io/TorchPfaffian/notebooks/tutorial.html) and
+  [domino tilings and dimer probabilities](https://matchcake.github.io/TorchPfaffian/notebooks/domino_tilings.html).
+- Performance against pfapack: [performance](https://matchcake.github.io/TorchPfaffian/performance.html).
 - Known limitations (`torch.func`, thread count, half precision): [limitations](https://matchcake.github.io/TorchPfaffian/limitations.html).
 - Changes between versions: [CHANGELOG.md](https://github.com/MatchCake/TorchPfaffian/blob/dev/CHANGELOG.md).
 

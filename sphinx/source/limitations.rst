@@ -11,24 +11,29 @@ The strategies assume that the input is skew-symmetric (``A == -A^T``) and do no
 non-skew input gives a meaningless result without an error. Pass ``check_input=True`` to
 :func:`torch_pfaffian.pfaffian` to validate the input first (an ``O(n^2)`` comparison).
 
-Half precision (``float16``, ``bfloat16``)
-------------------------------------------
+Supported dtypes and half precision
+-----------------------------------
 
-PyTorch has no LU factorization in half precision, and every path beyond the unrolled kernel for
-``m <= 6`` needs one. :func:`~torch_pfaffian.pfaffian` therefore computes ``float16`` and ``bfloat16``
-inputs with ``m > 6`` in ``float32`` (also at smaller sizes with ``mask_roundoff_gradient=True``, or
-when the unrolled kernel's result is not finite), casts the
-result back, and emits a ``UserWarning``; :func:`~torch_pfaffian.slog_pfaffian` does the same at every
-size. Gradients flow back through the cast. Two consequences:
+:func:`~torch_pfaffian.pfaffian` and :func:`~torch_pfaffian.slog_pfaffian` accept ``float16``,
+``bfloat16``, ``float32``, ``float64``, ``complex32``, ``complex64`` and ``complex128`` inputs, and raise a
+``TypeError`` for any other dtype (integers, booleans, ``float8``): convert those first, for example with
+``.to(torch.float64)``.
 
-- A Pfaffian that is finite in ``float32`` but beyond the range of the input dtype (above 65504 in
+PyTorch has no LU factorization in ``float16``, ``bfloat16`` and ``complex32``, and every path beyond the
+unrolled kernel for ``m <= 6`` needs one; ``complex32`` also lacks most arithmetic kernels. These inputs are
+therefore computed in ``float32`` (``complex64`` for ``complex32``) with a ``UserWarning``, and the result is
+cast back: at every size for ``complex32`` and in :func:`~torch_pfaffian.slog_pfaffian`, and for
+``float16`` and ``bfloat16`` when ``m > 6``, with ``mask_roundoff_gradient=True``, or when the unrolled
+kernel's result is not finite. Gradients flow back through the cast. Two consequences:
+
+- A Pfaffian that is finite after the upcast but beyond the range of the input dtype (above 65504 in
   ``float16``) becomes ``inf``, with a ``RuntimeWarning`` when ``check_finite=True``. Use
   :func:`~torch_pfaffian.slog_pfaffian` for such inputs.
-- With ``mask_roundoff_gradient=True``, the round-off criterion uses the ``float32`` precision. A
+- With ``mask_roundoff_gradient=True``, the round-off criterion uses the precision of the upcast dtype. A
   Pfaffian that is zero only up to the round-off of an earlier half-precision computation is not masked.
 
-Pass ``float32`` inputs to avoid the warning. The strategies called directly (for example
-``RustPfaffianParlettReid.apply``) do not upcast.
+Pass ``float32`` or ``complex64`` inputs to avoid the warning. The strategies called directly (for example
+``RustPfaffianParlettReid.apply``) do not upcast. PyTorch itself marks ``complex32`` as experimental.
 
 ``torch.func`` transforms
 -------------------------
