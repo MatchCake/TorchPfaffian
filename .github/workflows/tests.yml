@@ -117,7 +117,7 @@ jobs:
   Run-tests-on-macOS:
     name: Run tests on macOS (arm64)
     needs: [ Run-tests-on-Ubuntu ]
-    runs-on: macos-14
+    runs-on: macos-latest
     if: success()
     strategy:
       matrix:

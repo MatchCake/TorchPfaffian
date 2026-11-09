@@ -43,7 +43,7 @@ jobs:
             target: linux
           - os: windows-latest
             target: windows
-          - os: macos-14
+          - os: macos-latest
             target: macos-arm64
     runs-on: ${{ matrix.os }}
     defaults:
@@ -83,6 +83,10 @@ jobs:
 
     - name: Build native wheel
       if: matrix.target != 'linux'
+      env:
+        # Without it, the macOS wheel only installs on the runner's macOS version or newer. 11.0 is the
+        # oldest macOS of the PyTorch arm64 wheels. Ignored on Windows.
+        MACOSX_DEPLOYMENT_TARGET: "11.0"
       run: |
         uv run maturin build --release --out dist
         uv run twine check dist/*
