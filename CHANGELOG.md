@@ -16,6 +16,12 @@ changes the package's behaviour, API, documentation or packaging.
   block-form inputs to it (#18, #24).
 - `CHANGELOG.md`, and project URLs, keywords and classifiers for every supported Python version and
   platform.
+- Type stubs for the compiled Rust module (`torch_pfaffian/_rust.pyi`).
+
+### Changed
+
+- CI: mypy is blocking, the tutorial notebook runs on every pull request, the documentation is built
+  with warnings as errors on every pull request, and the GitHub Actions run on Node 24.
 
 ### Fixed
 
@@ -26,6 +32,7 @@ changes the package's behaviour, API, documentation or packaging.
 - The signed backward was 6 to 300 times slower on numerically singular matrices (#20, #26).
 - The singular-matrix detection in the backward no longer depends on the scale of the input (#24).
 - The documentation index no longer includes the README twice.
+- The routing table in the `pfaffian()` docstring did not render.
 
 ## [0.0.5] - 2026-07-13
 
