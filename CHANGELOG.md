@@ -17,10 +17,11 @@ changes the package's behaviour, API, documentation or packaging.
 - `CHANGELOG.md`, and project URLs, keywords and classifiers for every supported Python version and
   platform.
 - Type stubs for the compiled Rust module (`torch_pfaffian/_rust.pyi`).
+- A limitations page in the documentation.
 
 ### Changed
 
-- CI: mypy is blocking, the tutorial notebook runs on every pull request, the documentation is built
+- CI: macOS arm64 tests (Python 3.10 and 3.14), mypy is blocking, the tutorial notebook runs on every pull request, the documentation is built
   with warnings as errors on every pull request, and the GitHub Actions run on Node 24.
 
 ### Fixed
