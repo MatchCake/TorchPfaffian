@@ -2,7 +2,7 @@
 TorchPfaffian is a Python package for efficiently computing the Pfaffian of skew-symmetric matrices using PyTorch.
 """
 
-import importlib_metadata
+import importlib.metadata
 
 __author__ = "Jérémie Gince"
 __email__ = "gincejeremie@gmail.com"
@@ -11,9 +11,9 @@ __license__ = "Apache 2.0"
 __url__ = "https://github.com/MatchCake/TorchPfaffian"
 __package__ = "torch_pfaffian"
 try:
-    __version__ = importlib_metadata.version(__package__)
-except importlib_metadata.PackageNotFoundError:
-    __version__ = importlib_metadata.version("torchpfaffian")
+    __version__ = importlib.metadata.version(__package__)
+except importlib.metadata.PackageNotFoundError:
+    __version__ = importlib.metadata.version("torchpfaffian")
 
 import warnings
 from collections.abc import Callable
@@ -88,11 +88,11 @@ def pfaffian(
     ``mask_roundoff_gradient=True``             ``PfaffianMaskedMagnitude``  zero gradient at round-off zeros
     ``m <= AUTO_SMALL_MAX``                     ``PfaffianSmall``            exact unrolled kernel (all dtypes)
     block form, large input (see below)         ``PfaffianBlockDet``         one ``n x n`` determinant
-    ``sign=True``, Rust built, CPU input         ``RustPfaffianParlettReid``  fastest signed path (native Rust)
-    ``sign=True``, otherwise                     ``PfaffianParlettReid``      GPU-native and pure-Python fallback
-    ``sign=False``, ``epsilon`` given            ``magnitude_pfaffian``       log-domain magnitude with floor
-    ``sign=False``, grad needed                  ``PfaffianFDBPf``            magnitude only; robust backward
-    ``sign=False``, no grad                      ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
+    ``sign=True``, Rust built, CPU input        ``RustPfaffianParlettReid``  fastest signed path (native Rust)
+    ``sign=True``, otherwise                    ``PfaffianParlettReid``      GPU-native and pure-Python fallback
+    ``sign=False``, ``epsilon`` given           ``magnitude_pfaffian``       log-domain magnitude with floor
+    ``sign=False``, grad needed                 ``PfaffianFDBPf``            magnitude only; robust backward
+    ``sign=False``, no grad                     ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
     ==========================================  ===========================  ==================================
 
     Matrices with last dimension ``m <= AUTO_SMALL_MAX`` take the exact unrolled ``PfaffianSmall`` path

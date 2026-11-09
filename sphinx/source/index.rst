@@ -23,8 +23,6 @@ Welcome to TorchPfaffian's documentation!
    torch_pfaffian
 
 
-.. include:: readme.rst
-
 
 Indices and tables
 ==================
