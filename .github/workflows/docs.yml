@@ -3,6 +3,8 @@ name: Docs
 on:
   push:
     branches: ["main", "dev"]
+  pull_request:
+    branches: ["*"]
 
 permissions:
   contents: write
@@ -14,17 +16,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
     - name: Set up Python 3.11
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v6
       with:
         python-version: "3.11"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@v7
       with:
         version: "0.9.2"
         python-version: "3.11"
@@ -37,24 +39,27 @@ jobs:
 
     - name: Build the sphinx docs
       run: |
-        uv run sphinx-apidoc -f -o ./sphinx/source ./src/torch_pfaffian
+        uv run sphinx-apidoc -f --no-toc -o ./sphinx/source ./src/torch_pfaffian
         uv run make -C sphinx clean
         uv run python sphinx/clean_html_files.py
-        uv run make -C sphinx html
+        uv run make -C sphinx html SPHINXOPTS="-W --keep-going"
         touch sphinx/build/html/.nojekyll
 
     - name: Checkout gh-pages branch
+      if: github.event_name == 'push'
       run: |
         git checkout -b gh-pages
         git init
 
     - name: Copy build files to docs folder
+      if: github.event_name == 'push'
       run: |
         cp -a sphinx/build/html/. docs/
         uv run python sphinx/make_html_files_list.py
         rm -rf sphinx/build
 
     - name: Commit to gh-pages branch
+      if: github.event_name == 'push'
       run: |
         git add -f docs
         git config --local user.email "action@github.com"
@@ -62,6 +67,7 @@ jobs:
         git commit -m "Update docs"
 
     - name: Push to gh-pages branch
+      if: github.event_name == 'push'
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}

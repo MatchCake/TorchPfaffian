@@ -1,4 +1,5 @@
 import math
+from typing import cast
 
 import torch
 
@@ -26,7 +27,7 @@ class LogMagnitudePfaffian(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx: torch.autograd.function.BackwardCFunction, grad_output: torch.Tensor) -> torch.Tensor | None:
-        matrix, singular = ctx.saved_tensors
+        matrix, singular = cast("tuple[torch.Tensor, torch.Tensor]", ctx.saved_tensors)
         if not ctx.needs_input_grad[0]:
             return None
         identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
@@ -56,7 +57,7 @@ def log_magnitude_pfaffian(matrix: torch.Tensor) -> torch.Tensor:
     if matrix.shape[-1] % 2 == 1:
         batch_shape = matrix.shape[:-2]
         real_dtype = matrix.real.dtype if matrix.dtype.is_complex else matrix.dtype
-        connected_zero = matrix.reshape(*batch_shape, -1)[..., :0].sum(-1)  # value 0, grad_fn, entries unread
+        connected_zero = matrix.flatten(-2)[..., :0].sum(-1)  # value 0, grad_fn, entries unread
         if matrix.dtype.is_complex:
             connected_zero = connected_zero.real
         return connected_zero + torch.full(batch_shape, -torch.inf, dtype=real_dtype, device=matrix.device)

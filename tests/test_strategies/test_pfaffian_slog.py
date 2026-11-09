@@ -97,3 +97,19 @@ class TestSlogPfaffianStrategy:
             phase, _ = SlogPfaffianStrategy.apply(batch)
             assert phase.dtype == batch.dtype
             assert phase.device == batch.device
+
+    def test_backward_with_non_finite_entry_does_not_raise(self):
+        # LU flags an unbatched matrix with a NaN entry as singular; the backward must not raise on it.
+        matrix = torch.tensor([[0.0, float("nan")], [float("nan"), 0.0]], dtype=torch.float64, requires_grad=True)
+        _, log_abs = SlogPfaffianStrategy.apply(matrix)
+        log_abs.backward()
+        assert matrix.grad is not None and torch.isnan(matrix.grad).all()
+
+    def test_non_finite_element_keeps_neighbour_gradients_finite(self):
+        batch = _skew_batch((3,), 6, np.random.default_rng(TEST_SEED)).clone()
+        batch[0, 0, 1], batch[0, 1, 0] = float("nan"), float("nan")
+        batch.requires_grad_(True)
+        _, log_abs = SlogPfaffianStrategy.apply(batch)
+        log_abs.sum().backward()
+        assert batch.grad is not None
+        assert torch.isfinite(batch.grad[1:]).all()

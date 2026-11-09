@@ -12,21 +12,31 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
 ]
 dependencies = [
     "numpy (>=1.23,<3.0.0)",
     "torch (>=2.1,<3.0.0)",
 ]
 readme = "README.md"
+keywords = ["pfaffian", "skew-symmetric", "pytorch", "autodiff", "gpu", "free fermions", "matchgates"]
 
 [project.urls]
-homepage = "https://github.com/MatchCake/TorchPfaffian"
-Documentation = "https://MatchCake.github.io/TorchPfaffian"
+Documentation = "https://matchcake.github.io/TorchPfaffian/"
 Source = "https://github.com/MatchCake/TorchPfaffian"
+Issues = "https://github.com/MatchCake/TorchPfaffian/issues"
+Changelog = "https://github.com/MatchCake/TorchPfaffian/blob/main/CHANGELOG.md"
 
 [tool.pytest.ini_options]
 pythonpath = [
