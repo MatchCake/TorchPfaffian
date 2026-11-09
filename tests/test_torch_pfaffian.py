@@ -158,6 +158,7 @@ class TestTorchPfaffian:
         non_cpu_matrix.device.type = "cuda"
         non_cpu_matrix.shape = (8, 8)  # larger than AUTO_SMALL_MAX so the small-m kernel is bypassed
         non_cpu_matrix.numel.return_value = 64  # below AUTO_BLOCK_DET_MIN_NUMEL, so no block-form check
+        non_cpu_matrix.dtype = torch.float64
         with (
             mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust,
             mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake_python,
@@ -622,9 +623,99 @@ class TestTorchPfaffian:
         assert torch.all(matrix.grad[0] == 0)
         assert matrix.grad[1].abs().amax() > 0
 
-    def test_pfaffian_mask_roundoff_gradient_rejects_dtype_without_lu(self):
-        with pytest.raises(TypeError, match="LU determinant"):
-            pfaffian(torch.zeros(4, 4, dtype=torch.int64), sign=False, mask_roundoff_gradient=True)
+    @pytest.mark.parametrize("dtype", [torch.int64, torch.bool, torch.float8_e4m3fn])
+    @pytest.mark.parametrize("kwargs", [{}, {"sign": False}, {"sign": False, "mask_roundoff_gradient": True}])
+    def test_pfaffian_rejects_unsupported_dtype(self, dtype, kwargs):
+        with pytest.raises(TypeError, match=f"pfaffian supports .*; got {dtype}"):
+            pfaffian(torch.zeros(4, 4, dtype=dtype), **kwargs)
+
+    def test_pfaffian_checks_dtype_before_check_input(self):
+        # A non-skew input would fail check_input with a ValueError; the dtype check must come first.
+        matrix = torch.ones(4, 4, dtype=torch.int64)
+        with pytest.raises(TypeError, match="got torch.int64"):
+            pfaffian(matrix, check_input=True)
+
+    @pytest.mark.parametrize("sign", [True, False])
+    def test_pfaffian_complex32_result_beyond_range_warns(self, sign):
+        # Pf = 300^4 = 8.1e9 is finite in complex64 but exceeds the float16 range of complex32 and its magnitude.
+        matrix = _block_diagonal_skew([300.0] * 4).to(torch.complex32)
+        expected_dtype = torch.complex32 if sign else torch.float16
+        with pytest.warns(RuntimeWarning, match=f"exceeds the floating range of {expected_dtype}"):
+            with pytest.warns(UserWarning, match="computes torch.complex32"):
+                result = pfaffian(matrix, sign=sign)
+        assert result.dtype == expected_dtype
+        assert not torch.isfinite(result.to(torch.complex64)).all()
+
+    @pytest.mark.parametrize("dtype", [torch.int64, torch.bool, torch.float8_e4m3fn])
+    def test_slog_pfaffian_rejects_unsupported_dtype(self, dtype):
+        with pytest.raises(TypeError, match=f"slog_pfaffian supports .*; got {dtype}"):
+            torch_pfaffian.slog_pfaffian(torch.zeros(4, 4, dtype=dtype))
+
+    def test_supported_dtypes_constant(self):
+        assert set(torch_pfaffian.SUPPORTED_DTYPES) == {
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+        }
+
+    @pytest.mark.parametrize("dimension", [2, 4, 8])
+    @pytest.mark.parametrize("kwargs", _LOW_PRECISION_CASES)
+    def test_pfaffian_complex32_is_computed_in_complex64(self, dimension, kwargs):
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        full = torch.randn(3, dimension, dimension, dtype=torch.complex64, generator=generator)
+        matrix = (full - full.mT).to(torch.complex32).requires_grad_(True)
+        with pytest.warns(UserWarning, match="computes torch.complex32 inputs in torch.complex64"):
+            result = pfaffian(matrix, **kwargs)
+        reference_input = matrix.detach().to(torch.complex64).requires_grad_(True)
+        reference = pfaffian(reference_input, **kwargs)
+        expected_dtype = torch.complex32 if kwargs["sign"] else torch.float16
+        assert result.dtype == expected_dtype
+        torch.testing.assert_close(
+            result.to(reference.dtype), reference.to(expected_dtype).to(reference.dtype), atol=0.0, rtol=0.0
+        )
+        (result.real if result.dtype.is_complex else result).sum().backward()
+        (reference.real if reference.dtype.is_complex else reference).sum().backward()
+        assert matrix.grad is not None and matrix.grad.dtype == torch.complex32
+        assert reference_input.grad is not None
+        torch.testing.assert_close(
+            matrix.grad.to(torch.complex64),
+            reference_input.grad.to(torch.complex32).to(torch.complex64),
+            atol=0.0,
+            rtol=0.0,
+        )
+
+    def test_slog_pfaffian_complex32_is_computed_in_complex64(self):
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        full = torch.randn(2, 6, 6, dtype=torch.complex64, generator=generator)
+        matrix = (full - full.mT).to(torch.complex32)
+        with pytest.warns(UserWarning, match="slog_pfaffian computes torch.complex32"):
+            phase, log_abs = torch_pfaffian.slog_pfaffian(matrix)
+        reference_phase, reference_log_abs = torch_pfaffian.slog_pfaffian(matrix.to(torch.complex64))
+        assert phase.dtype == torch.complex32 and log_abs.dtype == torch.float16
+        torch.testing.assert_close(
+            phase.to(torch.complex64), reference_phase.to(torch.complex32).to(torch.complex64), atol=0.0, rtol=0.0
+        )
+        torch.testing.assert_close(log_abs, reference_log_abs.to(torch.float16), atol=0.0, rtol=0.0)
+
+    @pytest.mark.parametrize("batch_shape", [(0,), (2, 0)])
+    @pytest.mark.parametrize("dimension", [0, 1, 2, 3, 5, 7, 8])
+    @pytest.mark.parametrize("kwargs", _LOW_PRECISION_CASES)
+    def test_pfaffian_empty_batch_returns_empty_result(self, batch_shape, dimension, kwargs):
+        matrix = torch.zeros(*batch_shape, dimension, dimension, dtype=torch.float64, requires_grad=True)
+        result = pfaffian(matrix, **kwargs)
+        assert result.shape == batch_shape
+        assert result.dtype == torch.float64
+        result.sum().backward()
+        assert matrix.grad is not None and matrix.grad.shape == matrix.shape
+
+    @pytest.mark.parametrize("dimension", [0, 1, 4, 7])
+    def test_slog_pfaffian_empty_batch_returns_empty_result(self, dimension):
+        phase, log_abs = torch_pfaffian.slog_pfaffian(torch.zeros(0, dimension, dimension))
+        assert phase.shape == (0,) and log_abs.shape == (0,)
 
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
     @pytest.mark.parametrize("kwargs", _LOW_PRECISION_CASES)
