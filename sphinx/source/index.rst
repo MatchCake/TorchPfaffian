@@ -15,6 +15,7 @@ Welcome to TorchPfaffian's documentation!
    :caption: Tutorials:
 
    notebooks/tutorial
+   limitations
 
 .. toctree::
    :maxdepth: 4
@@ -22,8 +23,6 @@ Welcome to TorchPfaffian's documentation!
 
    torch_pfaffian
 
-
-.. include:: readme.rst
 
 
 Indices and tables

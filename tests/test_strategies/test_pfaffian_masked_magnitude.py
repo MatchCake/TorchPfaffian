@@ -52,6 +52,7 @@ def _unmasked_reference(matrix: torch.Tensor, epsilon: float) -> tuple[torch.Ten
     leaf = matrix.detach().clone().requires_grad_(True)
     value = torch.sqrt(torch.clamp(torch.abs(torch.linalg.det(leaf)), min=epsilon))
     value.sum().backward()
+    assert leaf.grad is not None
     return value.detach(), leaf.grad
 
 

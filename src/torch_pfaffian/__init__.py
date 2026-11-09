@@ -2,7 +2,7 @@
 TorchPfaffian is a Python package for efficiently computing the Pfaffian of skew-symmetric matrices using PyTorch.
 """
 
-import importlib_metadata
+import importlib.metadata
 
 __author__ = "Jérémie Gince"
 __email__ = "gincejeremie@gmail.com"
@@ -11,9 +11,9 @@ __license__ = "Apache 2.0"
 __url__ = "https://github.com/MatchCake/TorchPfaffian"
 __package__ = "torch_pfaffian"
 try:
-    __version__ = importlib_metadata.version(__package__)
-except importlib_metadata.PackageNotFoundError:
-    __version__ = importlib_metadata.version("torchpfaffian")
+    __version__ = importlib.metadata.version(__package__)
+except importlib.metadata.PackageNotFoundError:
+    __version__ = importlib.metadata.version("torchpfaffian")
 
 import warnings
 from collections.abc import Callable
@@ -36,6 +36,27 @@ AUTO_SMALL_MAX = 6
 AUTO_BLOCK_DET_MIN_NUMEL = 2**14
 # Dtypes with an LU determinant; other dtypes (e.g. float16) keep the general routes.
 _BLOCK_DET_DTYPES = (torch.float32, torch.float64, torch.complex64, torch.complex128)
+# Dtypes without a PyTorch LU factorization, which every path needs beyond the unrolled small kernel (and
+# the log-domain backward at every size). They are computed in UPCAST_DTYPE and the result is cast back.
+LOW_PRECISION_DTYPES = (torch.float16, torch.bfloat16)
+UPCAST_DTYPE = torch.float32
+
+
+def _warn_upcast(function_name: str, dtype: torch.dtype, stacklevel: int) -> None:
+    """
+    Warn that ``function_name`` computes a ``dtype`` input in :data:`UPCAST_DTYPE`.
+
+    :param function_name: Name of the public function, as the caller wrote it.
+    :param dtype: Low-precision dtype of the input, one of :data:`LOW_PRECISION_DTYPES`.
+    :param stacklevel: Stack level of the caller's frame, counted from the function calling this one.
+    """
+    warnings.warn(
+        f"{function_name} computes {dtype} inputs in {UPCAST_DTYPE} and casts the result back, because "
+        f"PyTorch's linear algebra does not support {dtype}. Pass {UPCAST_DTYPE} inputs to avoid this warning.",
+        UserWarning,
+        stacklevel=stacklevel + 1,
+    )
+
 
 pfaffian_strategy_map = {_cls.NAME.lower().strip(): _cls for _cls in get_all_subclasses(PfaffianStrategy)}
 
@@ -56,12 +77,18 @@ def slog_pfaffian(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     matrices nor underflows for tiny Pfaffians, and the kernel never synchronizes with the host.
     ``log_abs`` is differentiable wherever ``Pf != 0``; ``phase`` is non-differentiable (use
     :func:`pfaffian` with ``sign=True`` for the full derivative).
+    ``float16`` and ``bfloat16`` inputs are computed in ``float32`` (with a ``UserWarning``) and the
+    result is cast back, since PyTorch has no LU factorization in those dtypes.
 
     :param matrix: Skew-symmetric matrix of shape ``(..., 2n, 2n)``.
     :return: A pair ``(phase, log_abs)``, each of shape ``(...,)``. ``phase`` shares the input dtype
         (``0`` when ``Pf = 0``); ``log_abs`` is in the matching real dtype (``-inf`` when ``Pf = 0``).
     :rtype: tuple[torch.Tensor, torch.Tensor]
     """
+    if matrix.dtype in LOW_PRECISION_DTYPES:
+        _warn_upcast("slog_pfaffian", matrix.dtype, stacklevel=2)
+        phase, log_abs = SlogPfaffianStrategy.apply(matrix.to(UPCAST_DTYPE))
+        return phase.to(matrix.dtype), log_abs.to(matrix.dtype)
     return SlogPfaffianStrategy.apply(matrix)
 
 
@@ -88,11 +115,11 @@ def pfaffian(
     ``mask_roundoff_gradient=True``             ``PfaffianMaskedMagnitude``  zero gradient at round-off zeros
     ``m <= AUTO_SMALL_MAX``                     ``PfaffianSmall``            exact unrolled kernel (all dtypes)
     block form, large input (see below)         ``PfaffianBlockDet``         one ``n x n`` determinant
-    ``sign=True``, Rust built, CPU input         ``RustPfaffianParlettReid``  fastest signed path (native Rust)
-    ``sign=True``, otherwise                     ``PfaffianParlettReid``      GPU-native and pure-Python fallback
-    ``sign=False``, ``epsilon`` given            ``magnitude_pfaffian``       log-domain magnitude with floor
-    ``sign=False``, grad needed                  ``PfaffianFDBPf``            magnitude only; robust backward
-    ``sign=False``, no grad                      ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
+    ``sign=True``, Rust built, CPU input        ``RustPfaffianParlettReid``  fastest signed path (native Rust)
+    ``sign=True``, otherwise                    ``PfaffianParlettReid``      GPU-native and pure-Python fallback
+    ``sign=False``, ``epsilon`` given           ``magnitude_pfaffian``       log-domain magnitude with floor
+    ``sign=False``, grad needed                 ``PfaffianFDBPf``            magnitude only; robust backward
+    ``sign=False``, no grad                     ``PfaffianDet``              cheapest: ``sqrt(|det|)`` only
     ==========================================  ===========================  ==================================
 
     Matrices with last dimension ``m <= AUTO_SMALL_MAX`` take the exact unrolled ``PfaffianSmall`` path
@@ -110,6 +137,14 @@ def pfaffian(
     floored at ``sqrt(PfaffianStrategy.EPSILON)`` like the determinant paths). Only float32, float64,
     complex64 and complex128 inputs are routed. The test rejects a general input after reading one entry
     per matrix, and the gradient matches the general strategies.
+
+    ``float16`` and ``bfloat16`` inputs with ``m > AUTO_SMALL_MAX``, with ``mask_roundoff_gradient=True``, or
+    whose unrolled-kernel result is not finite, are computed in ``float32`` (with a ``UserWarning``) and the
+    result is cast back, since PyTorch has no LU factorization in those dtypes. The gradient flows back
+    through the cast. A result that is finite in ``float32`` but exceeds the range of the input dtype becomes
+    ``inf``, with a ``RuntimeWarning`` when ``check_finite=True``. The round-off criterion of
+    ``mask_roundoff_gradient`` then uses the ``float32`` precision, so a Pfaffian that is zero only up to the
+    round-off of an earlier half-precision computation is not masked.
 
     The Pfaffian is only defined for skew-symmetric matrices; the strategies assume this and do not
     check it. Pass ``check_input=True`` to validate the assumption. The chosen strategy is the fastest
@@ -153,7 +188,8 @@ def pfaffian(
         see :class:`PfaffianMaskedMagnitude` for the limits of the round-off criterion.
     :raises ValueError: If ``mask_roundoff_gradient=True`` with ``sign=True``, or if ``check_input=True``
         and ``matrix`` is not square and skew-symmetric.
-    :raises TypeError: If ``mask_roundoff_gradient=True`` and ``matrix`` has no LU dtype (e.g. float16).
+    :raises TypeError: If ``mask_roundoff_gradient=True`` and ``matrix`` is not a floating or complex
+        dtype with an LU factorization (e.g. ``int64``).
     :return: The Pfaffian of the input, of shape ``(...,)``.
     :rtype: torch.Tensor
     """
@@ -164,6 +200,31 @@ def pfaffian(
             raise ValueError("Input matrix is not skew-symmetric (A != -A^T).")
     if mask_roundoff_gradient and sign:
         raise ValueError("mask_roundoff_gradient only applies to the magnitude path; pass sign=False.")
+    return _pfaffian(matrix, sign, check_finite, epsilon, mask_roundoff_gradient, stacklevel=3)
+
+
+def _pfaffian(
+    matrix: torch.Tensor,
+    sign: bool,
+    check_finite: bool,
+    epsilon: float | None,
+    mask_roundoff_gradient: bool,
+    stacklevel: int,
+) -> torch.Tensor:
+    """
+    Route a validated input of :func:`pfaffian` to its strategy, with the overflow recovery.
+
+    :param matrix: Skew-symmetric matrix of shape ``(..., 2n, 2n)``.
+    :param sign: See :func:`pfaffian`.
+    :param check_finite: See :func:`pfaffian`.
+    :param epsilon: See :func:`pfaffian`.
+    :param mask_roundoff_gradient: See :func:`pfaffian`.
+    :param stacklevel: Stack level of the user's frame for the warnings emitted here.
+    :return: The Pfaffian of the input, of shape ``(...,)``.
+    :rtype: torch.Tensor
+    """
+    if matrix.dtype in LOW_PRECISION_DTYPES and (mask_roundoff_gradient or matrix.shape[-1] > AUTO_SMALL_MAX):
+        return _pfaffian_upcast(matrix, sign, check_finite, epsilon, mask_roundoff_gradient, stacklevel + 1)
     if mask_roundoff_gradient and matrix.dtype not in _BLOCK_DET_DTYPES:
         raise TypeError(
             f"mask_roundoff_gradient needs an LU determinant, available for float32, float64, complex64 and "
@@ -207,6 +268,9 @@ def pfaffian(
         result = PfaffianDet.apply(matrix)
 
     if check_finite and not torch.isfinite(result).all():
+        if matrix.dtype in LOW_PRECISION_DTYPES:
+            # The unrolled kernel overflowed in half precision; the log-domain recovery needs an LU.
+            return _pfaffian_upcast(matrix, sign, check_finite, epsilon, mask_roundoff_gradient, stacklevel + 1)
         # The linear-domain fast paths can overflow to inf on wide-dynamic-range inputs whose true
         # Pfaffian is finite. Transparently recover those elements in the log domain (Pf = phase *
         # exp(log|Pf|) for the signed path, exp(log|Pf|) for the magnitude path), so the caller gets
@@ -240,6 +304,41 @@ def pfaffian(
                 "the floating range of the input dtype at this matrix dimension. Use slog_pfaffian for the "
                 "log-magnitude, or a higher-precision dtype.",
                 RuntimeWarning,
-                stacklevel=2,
+                stacklevel=stacklevel,
             )
+    return result
+
+
+def _pfaffian_upcast(
+    matrix: torch.Tensor,
+    sign: bool,
+    check_finite: bool,
+    epsilon: float | None,
+    mask_roundoff_gradient: bool,
+    stacklevel: int,
+) -> torch.Tensor:
+    """
+    Compute :func:`pfaffian` of a low-precision input in :data:`UPCAST_DTYPE` and cast the result back.
+
+    :param matrix: Skew-symmetric matrix of shape ``(..., 2n, 2n)`` in one of :data:`LOW_PRECISION_DTYPES`.
+    :param sign: See :func:`pfaffian`.
+    :param check_finite: See :func:`pfaffian`.
+    :param epsilon: See :func:`pfaffian`.
+    :param mask_roundoff_gradient: See :func:`pfaffian`.
+    :param stacklevel: Stack level of the user's frame for the warnings emitted here.
+    :return: The Pfaffian of the input, of shape ``(...,)``, in the dtype of ``matrix``.
+    :rtype: torch.Tensor
+    """
+    _warn_upcast("pfaffian", matrix.dtype, stacklevel)
+    upcast = _pfaffian(
+        matrix.to(UPCAST_DTYPE), sign, check_finite, epsilon, mask_roundoff_gradient, stacklevel=stacklevel + 1
+    )
+    result = upcast.to(matrix.dtype)
+    if check_finite and bool((torch.isfinite(upcast) & ~torch.isfinite(result)).any()):
+        warnings.warn(
+            f"Pfaffian is finite in {UPCAST_DTYPE} but exceeds the floating range of {matrix.dtype}. Use "
+            f"slog_pfaffian for the log-magnitude, or a higher-precision dtype.",
+            RuntimeWarning,
+            stacklevel=stacklevel,
+        )
     return result

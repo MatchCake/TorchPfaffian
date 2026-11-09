@@ -66,7 +66,7 @@ def move_private_folders(app, e):
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = "torch_pfaffian"
+project = "TorchPfaffian"
 copyright = torch_pfaffian.__copyright__.replace("Copyright ", "")
 author = torch_pfaffian.__author__
 version = torch_pfaffian.__version__
@@ -89,6 +89,10 @@ extensions = [
 
 bibtex_bibfiles = ["references.bib"]
 
+# The strategies override torch.autograd.Function methods without docstrings of their own; inheriting
+# torch's would render its tutorial text, whose cross-references point into the PyTorch docs.
+autodoc_inherit_docstrings = False
+
 nb_execution_mode = "force"
 nb_execution_timeout = 300
 
@@ -104,7 +108,7 @@ exclude_patterns = []
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "karma_sphinx_theme"
-html_static_path = ["_static"]
+html_static_path: list[str] = []
 # html_css_files = [
 #     'css/float_right.css',
 # ]

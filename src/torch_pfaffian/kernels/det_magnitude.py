@@ -1,4 +1,5 @@
 import math
+from typing import cast
 
 import torch
 
@@ -26,7 +27,7 @@ class LogMagnitudePfaffian(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx: torch.autograd.function.BackwardCFunction, grad_output: torch.Tensor) -> torch.Tensor | None:
-        matrix, singular = ctx.saved_tensors
+        matrix, singular = cast("tuple[torch.Tensor, torch.Tensor]", ctx.saved_tensors)
         if not ctx.needs_input_grad[0]:
             return None
         identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
