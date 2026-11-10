@@ -542,3 +542,23 @@ class TestLowRankPfaffian:
             atol=ATOL_SCALAR_COMPARISON,
             rtol=RTOL_SCALAR_COMPARISON,
         )
+
+    def test_in_place_kernels_update_the_inverse_itself_and_only_when_they_apply(self):
+        pytest.importorskip("torch_pfaffian._rust")
+        core = LowRankPfaffian._ratio_replace_and_inverse_core
+        for inverse in (torch.linalg.inv(self._skew(3, 8, 8)), torch.linalg.inv(self._skew(3, 8, 8)).contiguous()):
+            index, change = torch.tensor([1, 2, 3]), self._random(3, 8)
+            expected_ratio, expected_inverse = core(inverse, index, change)
+            ratio = LowRankPfaffian._native_call_in_place(core, (inverse, index, change))
+            torch.testing.assert_close(ratio, expected_ratio, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
+            torch.testing.assert_close(
+                inverse, expected_inverse, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+            )
+        update = self._random(3, 8, 2)
+        assert LowRankPfaffian._native_call_in_place(core, (inverse, index, change.requires_grad_(True))) is None
+        assert LowRankPfaffian._native_plan(LowRankPfaffian._ratio_core, (inverse, update), in_place=True) is None
+        complex_inverse = torch.linalg.inv(self._skew(3, 8, 8, dtype=torch.complex128)).contiguous()
+        core = LowRankPfaffian._ratio_and_inverse_core
+        complex_update = self._random(3, 8, 2, dtype=torch.complex128)
+        assert LowRankPfaffian._native_plan(core, (complex_inverse.conj(), complex_update), in_place=True) is None
+        assert LowRankPfaffian._native_plan(core, (complex_inverse.conj(), complex_update)) is not None

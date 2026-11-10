@@ -738,10 +738,10 @@ class TestPfaffianStrategy:
 
     def test_native_paths_apply_only_where_faster_and_without_a_graph(self):
         pytest.importorskip("torch_pfaffian._rust")
-        small, large = torch.zeros(1, 8, 8, dtype=torch.float64), torch.zeros(1, 64, 64, dtype=torch.float64)
+        small, large = torch.zeros(1, 8, 8, dtype=torch.float64), torch.zeros(1, 128, 128, dtype=torch.float64)
         assert PfaffianStrategy._native_flagged_inverse(small) is not None
         assert PfaffianStrategy._native_flagged_inverse(large) is None  # one large matrix: LAPACK is faster
-        assert PfaffianStrategy._native_flagged_inverse(large.expand(8, 64, 64)) is not None  # parallel batch
+        assert PfaffianStrategy._native_flagged_inverse(large.expand(8, 128, 128)) is not None  # parallel batch
         assert PfaffianStrategy._native_flagged_inverse(small.half()) is None  # no kernel for float16
         assert PfaffianStrategy._native_flagged_inverse(small.requires_grad_(True)) is None  # double backward
         pfaffian_value, weight = torch.ones(1, dtype=torch.float64), torch.ones(1, dtype=torch.float64)
@@ -771,3 +771,14 @@ class TestPfaffianStrategy:
         torch.testing.assert_close(
             native_regular, reference_regular, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
         )
+
+    def test_native_gradient_broadcasts_a_scalar_grad_output(self, monkeypatch):
+        pytest.importorskip("torch_pfaffian._rust")
+        matrices = self._native_cases(torch.float64, 8, 6)[4:]
+        pfaffians = PfaffianParlettReid.forward(matrices)
+        native = PfaffianParlettReid.pfaffian_grad_matrix(matrices, pfaffians, torch.tensor(2.0, dtype=torch.float64))
+        monkeypatch.setattr(strategy_module, "_NATIVE_INVERSE", {})
+        reference = PfaffianParlettReid.pfaffian_grad_matrix(
+            matrices, pfaffians, torch.tensor(2.0, dtype=torch.float64)
+        )
+        torch.testing.assert_close(native, reference, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)

@@ -302,3 +302,29 @@ class TestPfaffianUpdater:
         torch.testing.assert_close(
             immediate.pfaffian, delayed.pfaffian, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
         )
+
+    def test_immediate_moves_never_change_the_callers_tensors(self, monkeypatch):
+        pytest.importorskip("torch_pfaffian._rust")
+        monkeypatch.setattr(PfaffianUpdater, "IMMEDIATE_MAX_NUMEL", 2**62)
+        inverse = torch.linalg.inv(self._skew())
+        given = inverse.clone()
+        updater = PfaffianUpdater.from_inverse(inverse, max_delay=3)
+        index, change = torch.tensor([1, 4, 7]), 0.3 * self._updates(1)[0][..., 0]
+        updater.accept_replace(index, change)
+        torch.testing.assert_close(inverse, given, atol=0, rtol=0)  # from_inverse: copied before the update
+        held = updater.inverse
+        before = held.clone()
+        updater.accept_replace(index, -change)
+        torch.testing.assert_close(held, before, atol=0, rtol=0)  # returned by .inverse: copied again
+        updater.merge()  # nothing delayed: nothing to fold
+        assert updater.delay == 0
+
+    def test_moves_needing_a_graph_take_the_delayed_path(self, monkeypatch):
+        monkeypatch.setattr(PfaffianUpdater, "IMMEDIATE_MAX_NUMEL", 2**62)
+        change = (0.3 * self._updates(1)[0][..., 0]).requires_grad_(True)
+        for updater in (
+            PfaffianUpdater(self._skew(), max_delay=3),  # owns its inverse
+            PfaffianUpdater.from_inverse(torch.linalg.inv(self._skew()), max_delay=3),  # does not
+        ):
+            updater.accept_replace(torch.tensor([1, 4, 7]), change)
+            assert updater.delay == 1 and updater.pfaffian.requires_grad

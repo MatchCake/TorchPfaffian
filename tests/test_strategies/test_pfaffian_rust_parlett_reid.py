@@ -278,3 +278,50 @@ class TestRustPfaffianParlettReid:
         torch.testing.assert_close(first_cuda, first_cpu, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
         # Second derivatives of a few ill-conditioned random matrices differ by device at round-off times cond(A).
         torch.testing.assert_close(second_cuda, second_cpu, atol=ATOL_APPROX_COMPARISON, rtol=RTOL_APPROX_COMPARISON)
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.complex64, torch.complex128])
+    def test_fused_inverse_gives_the_same_values_and_gradients(self, dtype):
+        from torch_pfaffian.strategies.pfaffian_rust_parlett_reid import RustPfaffianWithInverse
+
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        entries = torch.randn(6, 8, 8, generator=generator, dtype=torch.float64)
+        if dtype.is_complex:
+            entries = torch.complex(entries, torch.randn(entries.shape, generator=generator, dtype=torch.float64))
+        matrices = (entries - entries.mT).to(dtype)
+        matrices[1] = 0  # singular: the exact adjugate (zero here)
+        matrices[2, :2, 2:] = 0  # singular, with a nonzero adjugate
+        matrices[2, 2:, :2] = 0
+        matrices[2, :2, :2] = 0
+        weights = torch.arange(1.0, 7.0, dtype=torch.float64).to(dtype)
+        results = []
+        for function in (RustPfaffianWithInverse, RustPfaffianParlettReid):
+            matrix = matrices.clone().requires_grad_(True)
+            value = function.apply(matrix)
+            (gradient,) = torch.autograd.grad(value, matrix, weights)
+            results.append((value.detach(), gradient))
+        single = dtype in (torch.float32, torch.complex64)
+        atol = ATOL_APPROX_COMPARISON if single else ATOL_MATRIX_COMPARISON
+        rtol = RTOL_APPROX_COMPARISON if single else RTOL_MATRIX_COMPARISON
+        for fused, reference in zip(results[0], results[1]):
+            torch.testing.assert_close(fused, reference, atol=atol, rtol=rtol)
+
+    def test_fused_inverse_supports_and_double_backward(self):
+        from torch_pfaffian.strategies.pfaffian_rust_parlett_reid import RustPfaffianWithInverse
+
+        assert RustPfaffianWithInverse.supports(torch.zeros(1, 96, 96, dtype=torch.float64))
+        assert not RustPfaffianWithInverse.supports(torch.zeros(1, 98, 98, dtype=torch.float64))  # one large matrix
+        assert RustPfaffianWithInverse.supports(torch.zeros(8, 128, 128, dtype=torch.float64))  # parallel batch
+        assert not RustPfaffianWithInverse.supports(torch.zeros(2, 7, 7, dtype=torch.float64))  # odd
+        assert not RustPfaffianWithInverse.supports(torch.zeros(2, 8, 8, dtype=torch.float16))  # no kernel
+        # Off the CPU, only the small inputs whose backward runs on the host.
+        assert RustPfaffianWithInverse.supports(torch.zeros(2, 8, 8, dtype=torch.float64, device="meta"))
+        assert not RustPfaffianWithInverse.supports(torch.zeros(1, 128, 128, dtype=torch.float64, device="meta"))
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        entries = torch.randn(3, 8, 8, generator=generator, dtype=torch.float64)
+        results = []
+        for function in (RustPfaffianWithInverse, RustPfaffianParlettReid):
+            matrix = (entries - entries.mT).requires_grad_(True)
+            (gradient,) = torch.autograd.grad(function.apply(matrix).sum(), matrix, create_graph=True)
+            (second,) = torch.autograd.grad(gradient.square().sum(), matrix)
+            results.append(second)
+        torch.testing.assert_close(results[0], results[1], atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)

@@ -3,6 +3,7 @@ TorchPfaffian computes batched, differentiable Pfaffians of skew-symmetric matri
 """
 
 import importlib.metadata
+import os
 
 __author__ = "Jérémie Gince"
 __email__ = "jeremie.gince@usherbrooke.ca"
@@ -21,7 +22,7 @@ from collections.abc import Callable
 import numpy as np
 import torch
 
-from .kernels import log_magnitude_pfaffian, magnitude_pfaffian
+from .kernels import ParlettReidTriton, log_magnitude_pfaffian, magnitude_pfaffian
 from .low_rank import CompiledLowRankPfaffian, LowRankPfaffian, PfaffianChain, PfaffianUpdater
 from .strategies import *
 from .utils import get_all_subclasses
@@ -36,13 +37,25 @@ AUTO_SMALL_MAX = 6
 # [[0, B], [-B^T, 0]] are routed to PfaffianBlockDet (one n x n determinant). Below this size the block-form
 # check and the strategy's overhead outweigh its gain over the general paths (measured on CPU).
 AUTO_BLOCK_DET_MIN_NUMEL = 2**14
-# Signed inputs on another device (CUDA) with batch * m^2 at most AUTO_HOST_MAX_BATCH_SQUARE are computed by the
-# Rust kernel on the host and the result copied back. On the device, each of the m / 2 elimination steps of
-# PfaffianParlettReid costs about a dozen kernel launches (about 0.2 ms per step on an RTX 3070), whatever the
-# batch; on the host, the Rust kernel costs about 4e-11 s * batch * m^3 on 12 cores, and up to 4x that in some
-# process states (measured, not explained). The two meet between batch * m^2 = 2^20 and 2^22; 2^20 keeps the host
-# route faster in both states (m = 256 with a batch of 16 takes 4 to 16 ms on the host, 22 ms on the device).
+# Signed inputs on another device (CUDA) that are small enough are computed by the Rust kernel on the host and the
+# result copied back. Without the Triton kernel (complex inputs, or Triton not installed), the device runs the
+# PyTorch elimination, about a dozen kernel launches per step whatever the batch, and the host wins up to
+# batch * m^2 = AUTO_HOST_MAX_BATCH_SQUARE.
 AUTO_HOST_MAX_BATCH_SQUARE = 2**20
+# With the Triton kernel (one launch for the batch), the host wins up to a bound per dtype that grows with the host
+# threads (measured on an RTX 3070 and a 12-core CPU). Batches of at least 8 matrices run in parallel on the host,
+# and their bound is the entry of AUTO_HOST_MAX_BATCH_SQUARE_TRITON per thread, up to its thread cap: float64 2^18
+# with one thread (m = 128 with a batch of 16: 2.4 ms against 3.1 ms; m = 64 with 64: 1.8 ms against 1.1 ms), 2^20
+# with 4 and just below 2^22 from 15 (m = 128 with 256: 27 ms against 16 ms); float32 2^15 with one thread and
+# 2^16 from 2. Smaller batches run on one thread, with the
+# bound of AUTO_HOST_MAX_BATCH_SQUARE_TRITON_SERIAL (float64 m = 512 with 4: 34 ms against 69 ms). Many small
+# matrices go to the kernel, which runs them in parallel: m <= 32 with a batch of 64 or more.
+AUTO_HOST_MAX_BATCH_SQUARE_TRITON = {torch.float32: (2**15, 2), torch.float64: (2**18, 15)}
+AUTO_HOST_MAX_BATCH_SQUARE_TRITON_SERIAL = {torch.float32: 2**16, torch.float64: 2**22 - 1}
+AUTO_TRITON_SMALL_MAX_DIMENSION = 32
+AUTO_TRITON_SMALL_MIN_BATCH = 64
+# Batches with at least this many matrices run in parallel in the Rust kernel (its PARALLEL_BATCH_THRESHOLD).
+HOST_PARALLEL_MIN_BATCH = 8
 # Dtypes with a PyTorch LU factorization, which every path beyond the unrolled small kernel needs.
 LU_DTYPES = (torch.float32, torch.float64, torch.complex64, torch.complex128)
 # Dtypes without one (and, for complex32, without most arithmetic kernels). They are computed in
@@ -180,9 +193,10 @@ def pfaffian(
     first, regardless of ``sign`` and device (``|Pf|`` for ``sign=False``); it is exact for every dtype
     and differentiable end-to-end. For larger matrices the Rust kernel runs on CPU (in real and complex
     precisions). A non-CPU (e.g. CUDA) input is computed by the same kernel on the host when it is small
-    (``batch * m^2 = matrix.numel() <= AUTO_HOST_MAX_BATCH_SQUARE``), since the device elimination is
-    bound by its kernel launches there: the matrix is copied to the host and the Pfaffian back, which
-    synchronizes with the device, and the backward runs on the device. Larger inputs, and inputs while a
+    (``batch * m^2 = matrix.numel() <= AUTO_HOST_MAX_BATCH_SQUARE``, or the bounds of
+    ``AUTO_HOST_MAX_BATCH_SQUARE_TRITON`` for the real inputs of the Triton kernel), since the device is slower
+    there: the matrix is copied to the host and the Pfaffian back, which synchronizes with the device, and the
+    backward runs on the host for the smallest inputs and on the device otherwise. Larger inputs, and inputs while a
     CUDA graph is being captured, are routed to ``PfaffianParlettReid``, which runs natively on the input
     device without a host round-trip; in ``float32`` and ``float64``, with Triton installed, its elimination is
     a single Triton kernel launch for the whole batch (see
@@ -318,7 +332,13 @@ def _pfaffian(
             # Without a graph to build, the forward is called directly: autograd's Function.apply costs about
             # 20 us, more than the kernel itself on small inputs.
             needs_graph = matrix.requires_grad and torch.is_grad_enabled()
-            result = RustPfaffianParlettReid.apply(matrix) if needs_graph else RustPfaffianParlettReid.forward(matrix)
+            if not needs_graph:
+                result = RustPfaffianParlettReid.forward(matrix)
+            elif RustPfaffianWithInverse is not None and RustPfaffianWithInverse.supports(matrix):
+                # One native call for the Pfaffian and the inverse of its backward.
+                result = RustPfaffianWithInverse.apply(matrix)
+            else:
+                result = RustPfaffianParlettReid.apply(matrix)
         else:
             result = PfaffianParlettReid.apply(matrix)
     elif epsilon is not None:
@@ -384,16 +404,43 @@ def _all_finite(result: torch.Tensor) -> bool:
     return bool(torch.isfinite(result).all())
 
 
+def _host_threads() -> int:
+    """
+    Number of threads of the Rust kernel's pool: ``RAYON_NUM_THREADS`` when set, else the number of CPUs.
+
+    :return: The number of threads, at least 1.
+    :rtype: int
+    """
+    configured = os.environ.get("RAYON_NUM_THREADS", "")
+    if configured.isdigit() and int(configured) > 0:
+        return int(configured)
+    return os.cpu_count() or 1
+
+
 def _on_host(matrix: torch.Tensor) -> bool:
     """
     Whether a signed input on a non-CPU device is computed by the Rust kernel on the host.
 
     :param matrix: Skew-symmetric matrix of shape ``(..., m, m)`` on a non-CPU device.
-    :return: ``True`` when ``batch * m^2 <= AUTO_HOST_MAX_BATCH_SQUARE`` and no CUDA graph is being captured (a
-        capture cannot copy to the host).
+    :return: ``True`` when ``batch * m^2`` is at most ``AUTO_HOST_MAX_BATCH_SQUARE``, or, when the Triton kernel
+        takes the input, its bound per dtype (per host thread for parallel batches, see
+        ``AUTO_HOST_MAX_BATCH_SQUARE_TRITON``; never for at least ``AUTO_TRITON_SMALL_MIN_BATCH`` matrices of size
+        at most ``AUTO_TRITON_SMALL_MAX_DIMENSION``), and no CUDA graph is being captured (a capture cannot copy to
+        the host).
     :rtype: bool
     """
-    if matrix.numel() > AUTO_HOST_MAX_BATCH_SQUARE:  # batch * m^2
+    limit = AUTO_HOST_MAX_BATCH_SQUARE
+    if ParlettReidTriton.supports(matrix):
+        dimension = matrix.shape[-1]
+        batch = matrix.numel() // (dimension * dimension)
+        if dimension <= AUTO_TRITON_SMALL_MAX_DIMENSION and batch >= AUTO_TRITON_SMALL_MIN_BATCH:
+            return False
+        if batch >= HOST_PARALLEL_MIN_BATCH:
+            per_thread, thread_cap = AUTO_HOST_MAX_BATCH_SQUARE_TRITON[matrix.dtype]
+            limit = per_thread * min(_host_threads(), thread_cap)
+        else:
+            limit = AUTO_HOST_MAX_BATCH_SQUARE_TRITON_SERIAL[matrix.dtype]
+    if matrix.numel() > limit:  # batch * m^2
         return False
     return not (matrix.device.type == "cuda" and torch.cuda.is_current_stream_capturing())
 

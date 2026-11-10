@@ -152,7 +152,13 @@ class TestTorchPfaffian:
             pfaffian(self._large_skew_matrix(), sign=True)  # no graph to build: the forward is called directly
             fake.forward.assert_called_once()
             fake.apply.assert_not_called()
-            pfaffian(self._large_skew_matrix().requires_grad_(True), sign=True)  # through autograd
+            with mock.patch.object(torch_pfaffian, "RustPfaffianWithInverse") as fused:
+                fused.supports.return_value = True
+                fused.apply.return_value = torch.zeros(())
+                pfaffian(self._large_skew_matrix().requires_grad_(True), sign=True)  # the fused forward and backward
+                fused.apply.assert_called_once()
+                fused.supports.return_value = False
+                pfaffian(self._large_skew_matrix().requires_grad_(True), sign=True)  # through autograd
             fake.apply.assert_called_once()
 
     def test_pfaffian_routes_sign_true_to_python_when_rust_unavailable(self):
@@ -175,6 +181,9 @@ class TestTorchPfaffian:
         with (
             mock.patch.object(torch_pfaffian, "AUTO_HOST_MAX_BATCH_SQUARE", host_max),
             mock.patch.object(torch.cuda, "is_current_stream_capturing", return_value=capturing),
+            # The routing alone: not the fused graph, and the bounds without the Triton kernel.
+            mock.patch.object(torch_pfaffian, "RustPfaffianWithInverse", None),
+            mock.patch.object(torch_pfaffian.ParlettReidTriton, "supports", return_value=False),
             mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust,
             mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake_python,
         ):
@@ -183,6 +192,36 @@ class TestTorchPfaffian:
             pfaffian(self._non_cpu_matrix(), sign=True)
             assert fake_rust.apply.call_count == int(on_host)
             assert fake_python.apply.call_count == int(not on_host)
+
+    @pytest.mark.parametrize(
+        ("dtype", "shape", "threads", "on_host"),
+        [
+            (torch.float32, (16, 64, 64), "2", True),  # 2^16 entries: 2^15 per thread, up to 2 threads
+            (torch.float32, (16, 64, 64), "1", False),
+            (torch.float32, (8, 128, 128), "24", False),
+            (torch.float32, (1, 256, 256), "1", True),  # one matrix: one thread anyway
+            (torch.float64, (16, 256, 256), "4", True),  # 2^20 entries: 2^18 per thread, up to 15 threads
+            (torch.float64, (16, 256, 256), "2", False),
+            (torch.float64, (256, 128, 128), "24", False),  # 2^22 entries
+            (torch.float64, (4, 512, 512), "1", True),  # 2^20, a batch of 4: one thread anyway
+            (torch.float64, (64, 32, 32), "24", False),  # many small matrices
+            (torch.float64, (63, 32, 32), "24", True),
+            (torch.float64, (63, 32, 32), "", True),  # the CPU count
+        ],
+    )
+    def test_host_route_bounds_with_the_triton_kernel(self, dtype, shape, threads, on_host, monkeypatch):
+        monkeypatch.setenv("RAYON_NUM_THREADS", threads)
+        monkeypatch.setattr(torch_pfaffian.os, "cpu_count", lambda: 24)
+        matrix = mock.MagicMock()
+        matrix.device.type = "cuda"
+        matrix.dtype = dtype
+        matrix.shape = shape
+        matrix.numel.return_value = shape[0] * shape[1] * shape[2]
+        with (
+            mock.patch.object(torch_pfaffian.ParlettReidTriton, "supports", return_value=True),
+            mock.patch.object(torch.cuda, "is_current_stream_capturing", return_value=False),
+        ):
+            assert torch_pfaffian._on_host(matrix) == on_host
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
     @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])

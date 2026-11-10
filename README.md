@@ -75,10 +75,10 @@ with and without gradients, float64 and complex128, `m` from 8 to 256, and low-r
 
 | | fastest on, CPU | time vs fastest, CPU | fastest on, CUDA | time vs fastest, CUDA |
 |---|---|---|---|---|
-| TorchPfaffian | 35% | 1.4x | 36% | 1.6x |
-| lrux | 49% | 1.7x | 60% | 1.4x |
-| pfapack (C) | 19% | 7.9x | | |
-| torchpfaff | 0% | 25x | 33% | 3.5x |
+| TorchPfaffian | 51% | 1.3x | 35% | 1.5x |
+| lrux | 34% | 2.0x | 61% | 1.4x |
+| pfapack (C) | 19% | 9.2x | | |
+| torchpfaff | 0% | 29x | 38% | 1.6x |
 
 The time is the geometric mean, over the inputs a library computes, of its time over the fastest one's. A
 method whose first call takes over 10 s is timed from that call, compilation included, which raises the CUDA

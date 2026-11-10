@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Any, Callable
 
 import torch
 
@@ -18,3 +18,11 @@ try:
 except ImportError:  # pragma: no cover
     _RustStrategy = None  # pragma: no cover
 RustPfaffianParlettReid = _RustStrategy
+
+# The fused Pfaffian-and-inverse function of pfaffian()'s graphs on CPU; None without the compiled extension.
+_RustWithInverse: Any
+try:
+    from .pfaffian_rust_parlett_reid import RustPfaffianWithInverse as _RustWithInverse
+except ImportError:  # pragma: no cover
+    _RustWithInverse = None  # pragma: no cover
+RustPfaffianWithInverse = _RustWithInverse

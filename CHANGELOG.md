@@ -31,6 +31,24 @@ changes the package's behaviour, API, documentation or packaging.
 
 ### Changed
 
+- The Rust kernels run AVX2/FMA code when the CPU has it, chosen at run time (the wheels still target
+  baseline x86-64); the run-time dispatch of #44 generated none. The rank-2 inverse updates make one fused pass
+  over each matrix, write into NumPy arrays (transparent huge pages: 65 page faults instead of 32769 for a
+  134 MB batch), and `PfaffianUpdater` updates its inverse in place (copying first an inverse it does not
+  own): on one thread, a rank-2 update with its inverse of 64 matrices with `n = 512` takes 0.35 ms per
+  matrix instead of 1.32 ms, a row move of 64 with `n = 128` 13.7 us instead of 23.8 us, and an updater move
+  of 64 with `n = 128` 6.4 us instead of 35 us (#45).
+- The Rust inverse of the backward is a Gauss-Jordan elimination (the same pivots and flags), 2.6x faster
+  at `m = 32`, and is used up to `m = 96` on one matrix and `m = 128` on parallel batches.
+- `RustPfaffianWithInverse`: with a graph on CPU (and for the small CUDA inputs computed on the host), one
+  native call gives the Pfaffian and the inverse of its backward, and the backward only forms the gradient:
+  `pfaffian()` with its gradient takes 137 us instead of 204 us for one `8 x 8` matrix, 26 us instead of 64 us
+  per matrix for 256 with `m = 32`, and 370 us instead of 485 us for one `8 x 8` matrix on CUDA (#45).
+- The host route of CUDA inputs copies them into NumPy memory instead of `tensor.cpu()`, whose pages the
+  driver may leave unmapped: their first read took a page fault per 4 KiB, which made the Rust kernel 3 to 7x
+  slower in some process states (#45). The bounds of the host route are per dtype with the Triton kernel, and
+  grow with the host threads for parallel batches (`AUTO_HOST_MAX_BATCH_SQUARE_TRITON`); without it they are
+  unchanged.
 - `LowRankPfaffian.ratio`, `ratio_and_inverse`, `ratio_replace` and `ratio_replace_and_inverse` run in one
   Rust call on CPU without a graph to build: on one thread and one `n = 32` matrix, a rank-2 ratio and
   inverse take 18 us instead of 77 us and a row replacement with its inverse 23 us instead of 119 us,
