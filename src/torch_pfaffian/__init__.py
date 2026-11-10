@@ -21,7 +21,7 @@ from collections.abc import Callable
 import torch
 
 from .kernels import log_magnitude_pfaffian, magnitude_pfaffian
-from .low_rank import LowRankPfaffian, PfaffianChain, PfaffianUpdater
+from .low_rank import CompiledLowRankPfaffian, LowRankPfaffian, PfaffianChain, PfaffianUpdater
 from .strategies import *
 from .utils import get_all_subclasses
 

@@ -1,5 +1,6 @@
 import torch
 
+from .compiled_low_rank_pfaffian import CompiledLowRankPfaffian
 from .low_rank_pfaffian import LowRankPfaffian
 from .skew_gradient import SkewGradient
 
@@ -14,15 +15,20 @@ class PfaffianUpdater:
     current inverse is never formed between merges:
 
     .. math::
-        A_\tau^{-1} u = A_0^{-1} u + \sum_{t=1}^{\tau} a_t R_t^{-1} (a_t^T u),
+        A_\tau^{-1} u = A_0^{-1} u + \sum_{t=1}^{\tau} a_t R_t^{-1} (a_t^T u) = A_0^{-1} u + P D (P^T u),
 
-    so an update costs ``O(n^2 k + \tau n k^2)`` and does not rewrite the ``n x n`` inverse. After
+    with the projections side by side, ``P = (a_1, ..., a_tau)``, and the block-diagonal ``D`` of the
+    ``R_t^{-1}``, so an update costs ``O(n^2 k + \tau n k^2)`` and does not rewrite the ``n x n`` inverse. After
     ``max_delay`` accepted updates the corrections are merged into the inverse. lrux (arXiv:2602.05255)
     suggests ``max_delay`` of about ``n / (20 k)``.
 
     Every operation is a tensor operation on the batch, without host synchronization, so a batch of Monte
     Carlo walkers is updated at once: :meth:`accept` takes a mask of the walkers whose move is accepted, and
     leaves the others unchanged. Gradients flow through the state like through any tensor computation.
+
+    With ``compiled=True``, each step runs through ``torch.compile`` (see
+    :class:`~torch_pfaffian.low_rank.CompiledLowRankPfaffian`): a few seconds of compilation on the first steps,
+    then less per-call overhead on small matrices.
 
     Round-off accumulates over many updates, mostly in single precision. :meth:`reset` recomputes the
     inverse from the current matrix (which the caller keeps); the running :attr:`pfaffian` is the Pfaffian
@@ -33,10 +39,12 @@ class PfaffianUpdater:
     """
 
     _max_delay: int
+    _backend: type[LowRankPfaffian]
     _inverse: torch.Tensor  # A_0^{-1}, (..., n, n)
     _pfaffian: torch.Tensor  # (...)
-    _projections: list[torch.Tensor]  # a_t, each (..., n, 2k_t)
-    _r_inverses: list[torch.Tensor]  # R_t^{-1}, each (..., 2k_t, 2k_t)
+    _projections: torch.Tensor  # P = (a_1, ..., a_tau), (..., n, W) with W = sum 2k_t
+    _r_inverses: torch.Tensor  # D = diag(R_1^{-1}, ..., R_tau^{-1}), (..., W, W)
+    _delay: int
 
     @staticmethod
     def _check_matrix(matrix: torch.Tensor) -> None:
@@ -48,9 +56,87 @@ class PfaffianUpdater:
             names = ", ".join(str(dtype).removeprefix("torch.") for dtype in LU_DTYPES)
             raise TypeError(f"PfaffianUpdater supports {names}; got {matrix.dtype}.")
 
+    @staticmethod
+    def _step_core(
+        inverse: torch.Tensor, projections: torch.Tensor, r_inverses: torch.Tensor, update: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # A_tau^{-1} u = A_0^{-1} u + P D (P^T u), then the ratio and R^{-1} of the step.
+        projected = LowRankPfaffian.project(inverse, update)
+        if projections.shape[-1]:  # no delayed update right after a merge
+            matmul = LowRankPfaffian._matmul
+            projected = projected + matmul(projections, matmul(r_inverses, matmul(projections.mT, update)))
+        ratio, r_inverse = LowRankPfaffian._ratio_and_r_inverse_core(update, projected)
+        return ratio, projected, r_inverse
+
+    @staticmethod
+    def _ratio_core(
+        inverse: torch.Tensor, projections: torch.Tensor, r_inverses: torch.Tensor, update: torch.Tensor
+    ) -> torch.Tensor:
+        return PfaffianUpdater._step_core(inverse, projections, r_inverses, update)[0]
+
+    @staticmethod
+    def _accept_core(
+        inverse: torch.Tensor,
+        projections: torch.Tensor,
+        r_inverses: torch.Tensor,
+        pfaffian_value: torch.Tensor,
+        update: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # One accepted step: its ratio, P with a_tau appended, diag(D, R_tau^{-1}) and the new Pfaffian.
+        ratio, projected, r_inverse = PfaffianUpdater._step_core(inverse, projections, r_inverses, update)
+        batch_shape = torch.broadcast_shapes(projections.shape[:-2], projected.shape[:-2])
+        width, size = r_inverses.shape[-1], r_inverse.shape[-1]
+        projections = torch.cat(
+            [
+                projections.expand(*batch_shape, *projections.shape[-2:]),
+                projected.expand(*batch_shape, *projected.shape[-2:]),
+            ],
+            dim=-1,
+        )
+        r_inverses = r_inverses.expand(*batch_shape, width, width)
+        r_inverse = r_inverse.expand(*batch_shape, size, size)
+        top = torch.cat([r_inverses, r_inverses.new_zeros(*batch_shape, width, size)], dim=-1)
+        bottom = torch.cat([r_inverse.new_zeros(*batch_shape, size, width), r_inverse], dim=-1)
+        return ratio, projections, torch.cat([top, bottom], dim=-2), pfaffian_value * ratio
+
+    @staticmethod
+    def _row_update(index: torch.Tensor, change: torch.Tensor) -> torch.Tensor:
+        # u = (c, e_i) with c_i = 0, of shape (..., n, 2); index and change share their batch shape.
+        index = index[..., None]  # (..., 1)
+        change = change.scatter(-1, index, 0)  # the diagonal stays zero
+        return torch.stack([change, torch.zeros_like(change).scatter(-1, index, 1)], dim=-1)
+
+    @staticmethod
+    def _ratio_replace_core(
+        inverse: torch.Tensor,
+        projections: torch.Tensor,
+        r_inverses: torch.Tensor,
+        index: torch.Tensor,
+        change: torch.Tensor,
+    ) -> torch.Tensor:
+        update = PfaffianUpdater._row_update(index, change)
+        return PfaffianUpdater._step_core(inverse, projections, r_inverses, update)[0]
+
+    @staticmethod
+    def _accept_replace_core(
+        inverse: torch.Tensor,
+        projections: torch.Tensor,
+        r_inverses: torch.Tensor,
+        pfaffian_value: torch.Tensor,
+        index: torch.Tensor,
+        change: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        update = PfaffianUpdater._row_update(index, change)
+        return PfaffianUpdater._accept_core(inverse, projections, r_inverses, pfaffian_value, update)
+
     @classmethod
     def from_inverse(
-        cls, inverse: torch.Tensor, *, pfaffian: torch.Tensor | None = None, max_delay: int = 8
+        cls,
+        inverse: torch.Tensor,
+        *,
+        pfaffian: torch.Tensor | None = None,
+        max_delay: int = 8,
+        compiled: bool = False,
     ) -> "PfaffianUpdater":
         """
         Start from an inverse that is already known, without inverting a matrix or computing its Pfaffian.
@@ -59,30 +145,33 @@ class PfaffianUpdater:
         :param pfaffian: Pfaffian of the initial matrix, of shape ``(...)``. When ``None``, :attr:`pfaffian`
             starts at 1 and is the product of the accepted ratios, i.e. the Pfaffian relative to the start.
         :param max_delay: Number of accepted updates after which they are merged into the inverse, at least 1.
+        :param compiled: When ``True``, run the steps through ``torch.compile``.
         :return: The updater.
         :rtype: PfaffianUpdater
         :raises ValueError: If ``max_delay`` is smaller than 1 or ``inverse`` is not square.
         :raises TypeError: If the dtype of ``inverse`` is not supported.
         """
         updater = cls.__new__(cls)
-        updater._setup(max_delay)
+        updater._setup(max_delay, compiled)
         cls._check_matrix(inverse)
         updater._inverse = SkewGradient.apply_if_needed(inverse)
         updater._pfaffian = torch.ones(inverse.shape[:-2], dtype=inverse.dtype, device=inverse.device)
         if pfaffian is not None:
             updater._pfaffian = updater._pfaffian * pfaffian
+        updater._clear_delays()
         return updater
 
-    def __init__(self, matrix: torch.Tensor, *, max_delay: int = 8) -> None:
+    def __init__(self, matrix: torch.Tensor, *, max_delay: int = 8, compiled: bool = False) -> None:
         """
         Start from ``matrix``, computing its inverse and its Pfaffian.
 
         :param matrix: Invertible skew-symmetric matrix of shape ``(..., n, n)``.
         :param max_delay: Number of accepted updates after which they are merged into the inverse, at least 1.
+        :param compiled: When ``True``, run the steps through ``torch.compile``.
         :raises ValueError: If ``max_delay`` is smaller than 1 or ``matrix`` is not square.
         :raises TypeError: If the dtype of ``matrix`` is not supported.
         """
-        self._setup(max_delay)
+        self._setup(max_delay, compiled)
         self.reset(matrix)
 
     def ratio(self, update: torch.Tensor) -> torch.Tensor:
@@ -94,7 +183,9 @@ class PfaffianUpdater:
         :rtype: torch.Tensor
         """
         self._check_update(update)
-        return LowRankPfaffian.ratio_and_r_inverse(update, self._project(update))[0]
+        return self._backend._call(
+            PfaffianUpdater._ratio_core, self._inverse, self._projections, self._r_inverses, update
+        )
 
     def accept(self, update: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """
@@ -109,14 +200,11 @@ class PfaffianUpdater:
         self._check_update(update)
         if mask is not None:
             update = torch.where(mask[..., None, None], update, torch.zeros_like(update))
-        projected = self._project(update)
-        ratio, r_inverse = LowRankPfaffian.ratio_and_r_inverse(update, projected)
-        self._projections.append(projected)
-        self._r_inverses.append(r_inverse)
-        self._pfaffian = self._pfaffian * ratio
-        if len(self._projections) >= self._max_delay:
-            self.merge()
-        return ratio
+        state = (self._inverse, self._projections, self._r_inverses, self._pfaffian)
+        ratio, self._projections, self._r_inverses, self._pfaffian = self._backend._call(
+            PfaffianUpdater._accept_core, *state, update
+        )
+        return self._after_accept(ratio)
 
     def ratio_replace(self, index: torch.Tensor | int, change: torch.Tensor) -> torch.Tensor:
         """
@@ -128,7 +216,9 @@ class PfaffianUpdater:
         :return: The ratio, of shape ``(...)``.
         :rtype: torch.Tensor
         """
-        return self.ratio(self._replace_update(index, change))
+        index, change = self._prepare_replace(index, change)
+        state = (self._inverse, self._projections, self._r_inverses)
+        return self._backend._call(PfaffianUpdater._ratio_replace_core, *state, index, change)
 
     def accept_replace(
         self, index: torch.Tensor | int, change: torch.Tensor, mask: torch.Tensor | None = None
@@ -143,15 +233,22 @@ class PfaffianUpdater:
         :return: The ratio of the applied change, of shape ``(...)``, equal to 1 where ``mask`` is ``False``.
         :rtype: torch.Tensor
         """
-        return self.accept(self._replace_update(index, change), mask)
+        index, change = self._prepare_replace(index, change)
+        if mask is not None:
+            # c = 0 gives u = (0, e_i), so that -u J u^T = 0 and the ratio is exactly 1.
+            change = torch.where(mask[..., None], change, torch.zeros_like(change))
+        state = (self._inverse, self._projections, self._r_inverses, self._pfaffian)
+        ratio, self._projections, self._r_inverses, self._pfaffian = self._backend._call(
+            PfaffianUpdater._accept_replace_core, *state, index, change
+        )
+        return self._after_accept(ratio)
 
     def merge(self) -> None:
         """
         Fold the delayed updates into the stored inverse, ``A_0^{-1} <- A_tau^{-1}``.
         """
         self._inverse = self.inverse
-        self._projections.clear()
-        self._r_inverses.clear()
+        self._clear_delays()
 
     def reset(self, matrix: torch.Tensor) -> None:
         """
@@ -169,15 +266,25 @@ class PfaffianUpdater:
         inverse = torch.linalg.inv_ex(matrix)[0]  # no host synchronization; non-finite if matrix is singular
         self._inverse = 0.5 * (inverse - inverse.mT)
         self._pfaffian = pfaffian(matrix)
-        self._projections.clear()
-        self._r_inverses.clear()
+        self._clear_delays()
 
-    def _setup(self, max_delay: int) -> None:
+    def _setup(self, max_delay: int, compiled: bool) -> None:
         if max_delay < 1:
             raise ValueError(f"max_delay must be at least 1; got {max_delay}.")
         self._max_delay = max_delay
-        self._projections = []
-        self._r_inverses = []
+        self._backend = CompiledLowRankPfaffian if compiled else LowRankPfaffian
+
+    def _clear_delays(self) -> None:
+        inverse = self._inverse
+        self._projections = inverse.new_zeros(*inverse.shape[:-1], 0)
+        self._r_inverses = inverse.new_zeros(*inverse.shape[:-2], 0, 0)
+        self._delay = 0
+
+    def _after_accept(self, ratio: torch.Tensor) -> torch.Tensor:
+        self._delay += 1
+        if self._delay >= self._max_delay:
+            self.merge()
+        return ratio
 
     def _check_update(self, update: torch.Tensor) -> None:
         dimension = self._inverse.shape[-1]
@@ -189,23 +296,20 @@ class PfaffianUpdater:
                 f"{self._inverse.device}; got {update.dtype} on {update.device}."
             )
 
-    def _project(self, update: torch.Tensor) -> torch.Tensor:
-        projected = LowRankPfaffian.project(self._inverse, update)  # (..., n, 2k)
-        for projection, r_inverse in zip(self._projections, self._r_inverses):
-            projected = projected + projection @ (r_inverse @ (projection.mT @ update))  # O(n k^2)
-        return projected
-
-    def _replace_update(self, index: torch.Tensor | int, change: torch.Tensor) -> torch.Tensor:
+    def _prepare_replace(self, index: torch.Tensor | int, change: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         dimension = self._inverse.shape[-1]
         if change.shape[-1] != dimension:
             raise ValueError(f"change must have shape (..., {dimension}); got {tuple(change.shape)}.")
+        if change.dtype != self._inverse.dtype or change.device != self._inverse.device:
+            raise TypeError(
+                f"change must have the dtype and device of the matrix, {self._inverse.dtype} on "
+                f"{self._inverse.device}; got {change.dtype} on {change.device}."
+            )
         index = LowRankPfaffian.as_index(index, change.device)
         batch_shape = torch.broadcast_shapes(change.shape[:-1], index.shape)
-        change = change.expand(*batch_shape, dimension)
-        index = index.expand(batch_shape)[..., None]  # (..., 1)
-        change = change.scatter(-1, index, 0)  # the diagonal stays zero
-        one_hot = torch.zeros_like(change).scatter(-1, index, 1)
-        return torch.stack([change, one_hot], dim=-1)  # (..., n, 2), u = (c, e_i)
+        if change.shape[:-1] != batch_shape:
+            change = change.expand(*batch_shape, dimension)
+        return index.expand(batch_shape), change
 
     @property
     def delay(self) -> int:
@@ -215,7 +319,7 @@ class PfaffianUpdater:
         :return: The number of delayed updates, between 0 and ``max_delay - 1``.
         :rtype: int
         """
-        return len(self._projections)
+        return self._delay
 
     @property
     def inverse(self) -> torch.Tensor:
@@ -225,15 +329,11 @@ class PfaffianUpdater:
         :return: The inverse, of shape ``(..., n, n)``.
         :rtype: torch.Tensor
         """
-        if not self._projections:
+        if not self._delay:
             return self._inverse
-        # One fused pass over the n x n inverse for all the delayed corrections: A_0^{-1} + a R^{-1} a^T, with
-        # a = (a_1, ..., a_tau) and R^{-1} block diagonal.
-        projections = torch.cat(self._projections, dim=-1)  # (..., n, sum 2k_t)
-        right = torch.cat(
-            [r_inverse @ projection.mT for projection, r_inverse in zip(self._projections, self._r_inverses)], dim=-2
-        )  # (..., sum 2k_t, n)
-        return LowRankPfaffian.add_product(self._inverse, projections, right)
+        # One fused pass over the n x n inverse for all the delayed corrections: A_0^{-1} + P D P^T.
+        right = LowRankPfaffian._matmul(self._r_inverses, self._projections.mT)
+        return LowRankPfaffian.add_product(self._inverse, self._projections, right)
 
     @property
     def max_delay(self) -> int:

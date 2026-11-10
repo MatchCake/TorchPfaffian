@@ -67,7 +67,7 @@ class TestPfaffianChain:
             border, corner = matrix[..., :previous, previous:size], matrix[..., previous:size, previous:size]
             proposed = chain.ratio(border, corner)
             ratio = chain.extend(border, corner)
-            torch.testing.assert_close(ratio, proposed, atol=0, rtol=0)
+            torch.testing.assert_close(ratio, proposed, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
             torch.testing.assert_close(
                 chain.pfaffian,
                 pfaffian(matrix[..., :size, :size]),

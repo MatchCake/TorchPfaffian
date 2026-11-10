@@ -22,6 +22,12 @@ changes the package's behaviour, API, documentation or packaging.
 - `PfaffianUpdater`: chains of accepted low-rank updates with delayed inverse updates, per-walker
   acceptance masks, and a running Pfaffian (#33).
 - `benchmarks/library_comparison.py --ratios`: Pfaffian ratios against lrux and full recomputation (#33).
+- `CompiledLowRankPfaffian`, and `compiled=True` for `PfaffianChain` and `PfaffianUpdater`: the low-rank
+  updates run through `torch.compile` (validation stays eager), which halves the inverse updates on small
+  inputs on CPU and CUDA after a one-time compilation (#35).
+- `benchmarks/library_comparison.py` records the peak memory of each call next to its time, and
+  `benchmarks/plot_results.py` plots both against the matrix size, one panel per comparison, and every point
+  against the input size in one overview (`--overview`).
 
 ### Changed
 
@@ -30,6 +36,14 @@ changes the package's behaviour, API, documentation or packaging.
   [lrux](https://github.com/ChenAo-Phys/lrux), runs them and TorchPfaffian on the GPU when CUDA is
   available, prints a terminal table (`--markdown` for the old one), saves its results after every input
   and re-renders a saved run with `--render`. The README mentions and cites torchpfaff and lrux.
+- Lower per-call overhead of the low-rank updates on small inputs (#35): fewer operators per call (direct
+  `bmm`/`mm`, closed forms for rank 2, the small Pfaffian kernel called directly, no dtype conversion when
+  none is needed), and `PfaffianUpdater` keeps its delayed updates as two tensors instead of lists. On one
+  CPU thread, a rank-2 ratio of an `n = 32` matrix takes about 25 µs instead of 45 µs, a rank-4 ratio 36 µs
+  instead of 91 µs.
+- The unrolled small Pfaffian kernel (`m <= 10`) caches its index tables per device instead of rebuilding
+  them, with host-to-device copies on CUDA, on every call. This also speeds up `pfaffian()` for `m <= 6`: a
+  single `6 x 6` matrix takes 29 µs instead of 47 µs on CPU, 91 µs instead of 150 µs on CUDA.
 
 ## [0.0.6] - 2026-11-09
 

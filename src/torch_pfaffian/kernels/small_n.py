@@ -41,6 +41,40 @@ def _matching_tables(
     return tuple(rows), tuple(cols), tuple(signs)
 
 
+@lru_cache(maxsize=None)
+def _matching_index(dimension: int, device: torch.device) -> torch.Tensor:
+    """
+    Flat indices ``row * m + col`` of the matching factors, as a tensor on ``device`` (memoized).
+
+    Building them with ``torch.tensor`` on every call cost three tensor constructions (and, on CUDA, three
+    host-to-device copies) per Pfaffian, more than the arithmetic for the small sizes this kernel serves.
+
+    :param dimension: Even matrix dimension.
+    :param device: Device of the matrices.
+    :return: Indices of shape ``(n_terms, dimension // 2)``.
+    :rtype: torch.Tensor
+    """
+    rows, cols, _ = _matching_tables(dimension)
+    with torch.inference_mode(False):  # usable later under autograd, even when first built in inference mode
+        rows_tensor = torch.tensor(rows, dtype=torch.long, device=device)
+        return rows_tensor * dimension + torch.tensor(cols, dtype=torch.long, device=device)
+
+
+@lru_cache(maxsize=None)
+def _matching_signs(dimension: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    """
+    Permutation signs of the matchings, as a tensor of ``dtype`` on ``device`` (memoized).
+
+    :param dimension: Even matrix dimension.
+    :param dtype: Dtype of the matrices.
+    :param device: Device of the matrices.
+    :return: Signs of shape ``(n_terms,)``.
+    :rtype: torch.Tensor
+    """
+    with torch.inference_mode(False):
+        return torch.tensor(_matching_tables(dimension)[2], dtype=dtype, device=device)
+
+
 def small_pfaffian(matrix: torch.Tensor) -> torch.Tensor:
     r"""
     Signed/complex Pfaffian of a batch ``(..., m, m)`` for even ``m <= SMALL_N_MAX`` via unrolled matchings.
@@ -71,11 +105,9 @@ def small_pfaffian(matrix: torch.Tensor) -> torch.Tensor:
     if dimension > SMALL_N_MAX:
         raise ValueError(f"small_pfaffian supports m <= {SMALL_N_MAX}, got {dimension}")
 
-    rows, cols, signs = _matching_tables(dimension)
-    row_index = torch.tensor(rows, dtype=torch.long, device=matrix.device)  # (n_terms, m // 2)
-    col_index = torch.tensor(cols, dtype=torch.long, device=matrix.device)  # (n_terms, m // 2)
-    sign_vector = torch.tensor(signs, dtype=matrix.dtype, device=matrix.device)  # (n_terms,)
-    factors = matrix[..., row_index, col_index]  # (..., n_terms, m // 2)
+    flat_index = _matching_index(dimension, matrix.device)  # (n_terms, m // 2)
+    sign_vector = _matching_signs(dimension, matrix.dtype, matrix.device)  # (n_terms,)
+    factors = matrix.flatten(-2)[..., flat_index]  # (..., n_terms, m // 2)
     product = factors[..., 0]
     for factor_index in range(1, dimension // 2):
         product = product * factors[..., factor_index]

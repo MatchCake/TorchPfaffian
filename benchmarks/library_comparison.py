@@ -23,19 +23,24 @@ writing, since torchpfaff needs 3.12 or newer). A library that is not installed 
 A method that fails on an input (for example torchpfaff on complex matrices, which it does not support) is
 skipped, with a note on the first failure of each method and dtype. ``--markdown`` prints a Markdown table
 instead of the terminal one. The results are saved after every input; ``--render <file>`` prints the table of a
-saved (possibly interrupted) run. ``--ratios`` times Pfaffian ratios under low-rank updates instead (see
-:func:`measure_ratios`). A method whose single call takes more than ``--max-call-seconds`` (10 s) is
-timed from that call and skipped on larger inputs. torchpfaff's Triton kernel compiles for minutes from m = 64
-(cached on disk afterwards), so its CUDA path is skipped above ``--torchpfaff-cuda-max-size`` (64).
+saved (possibly interrupted) run. Each method's peak memory per call is recorded with its time (see
+:class:`PeakMemory`), and ``plot_results.py`` plots both against the matrix size. ``--ratios`` times Pfaffian
+ratios under low-rank updates instead (see :func:`measure_ratios`). A method whose single call takes more than
+``--max-call-seconds`` (10 s) is timed from that call and skipped on larger inputs. torchpfaff's Triton kernel
+compiles for minutes from m = 64 (cached on disk afterwards), so its CUDA path is skipped above
+``--torchpfaff-cuda-max-size`` (64).
 
 Threads are set through ``OMP_NUM_THREADS``, ``MKL_NUM_THREADS`` and ``RAYON_NUM_THREADS`` before torch is
 imported (never ``torch.set_num_threads``, which corrupts batched LU on some MKL builds; issue #23).
 """
 
 import argparse
+import ctypes
+import gc
 import json
 import os
 import platform
+import re
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -84,7 +89,9 @@ class Measurement:
     ``seconds`` is the best time over the repeats for the whole batch (for one update of the batch with
     ``--ratios``). ``max_relative_difference`` compares the method's Pfaffians (or ratios) with those of
     pfapack's C implementation (``nan`` when pfapack is not available). ``update`` names the low-rank update of
-    a ``--ratios`` measurement, and is empty for a full Pfaffian.
+    a ``--ratios`` measurement, and is empty for a full Pfaffian. ``peak_memory_bytes`` is the memory that one
+    call of the whole batch adds at its peak, measured by :class:`PeakMemory` (``nan`` when it cannot be measured,
+    and in results saved before it was recorded).
     """
 
     dimension: int
@@ -95,6 +102,78 @@ class Measurement:
     repeats: int
     max_relative_difference: float
     update: str = ""
+    peak_memory_bytes: float = float("nan")
+
+
+class PeakMemory:
+    """
+    Memory that one call adds at its peak, over what the process held before it.
+
+    A method on CUDA (named ``... (CUDA)``) is measured by torch's allocator statistics, which see the
+    allocations of torch and of torchpfaff's Triton kernel but not those of JAX: lrux on CUDA is not measured
+    (``nan``). A method on CPU is measured by the peak resident set size of the process, which sees every
+    library (NumPy, torch, JAX): free heap memory is returned to the system and the kernel's high-water mark
+    (``VmHWM``) is reset before the call, and the peak is read after it. That needs Linux; elsewhere the result is
+    ``nan``. The resolution is one page (4 KiB), and memory that an allocator keeps cached from the timed calls is
+    not counted again, so small inputs read as a few pages at most.
+    """
+
+    STATUS_FILE = Path("/proc/self/status")
+    CLEAR_REFS_FILE = Path("/proc/self/clear_refs")
+    RESET_PEAK = "5"  # written to clear_refs, resets VmHWM to the current RSS (Linux 4.0 or newer)
+
+    @staticmethod
+    def measure(name: str, function: Callable[[], object]) -> float:
+        """
+        Peak memory added by one call of ``function``.
+
+        :param name: Method name; one ending in ``(CUDA)`` runs on the GPU.
+        :param function: The method, already warmed up.
+        :return: Bytes, or ``nan`` when the memory cannot be measured.
+        :rtype: float
+        """
+        if name.endswith("(CUDA)"):  # pragma: no cover - needs a GPU
+            return float("nan") if name.startswith("lrux") else PeakMemory._cuda(function)
+        return PeakMemory._resident(function)
+
+    @staticmethod
+    def _cuda(function: Callable[[], object]) -> float:  # pragma: no cover - needs a GPU
+        import torch
+
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        before = torch.cuda.memory_allocated()
+        function()
+        torch.cuda.synchronize()
+        return float(torch.cuda.max_memory_allocated() - before)
+
+    @staticmethod
+    def _resident(function: Callable[[], object]) -> float:
+        gc.collect()
+        PeakMemory._release_free_memory()
+        try:
+            PeakMemory.CLEAR_REFS_FILE.write_text(PeakMemory.RESET_PEAK)
+            before = PeakMemory._status("VmRSS")
+        except (OSError, ValueError):  # not Linux, or no permission
+            return float("nan")
+        function()
+        return float(max(PeakMemory._status("VmHWM") - before, 0))
+
+    @staticmethod
+    def _status(key: str) -> int:
+        # A /proc/self/status entry, such as "VmRSS:   123456 kB", in bytes.
+        match = re.search(rf"^{key}:\s+(\d+) kB", PeakMemory.STATUS_FILE.read_text(), re.MULTILINE)
+        if match is None:
+            raise ValueError(f"no {key} in {PeakMemory.STATUS_FILE}")
+        return int(match.group(1)) * 1024
+
+    @staticmethod
+    def _release_free_memory() -> None:
+        # glibc keeps freed heap memory resident; malloc_trim returns it, so that the call's own peak shows.
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):  # pragma: no cover - not glibc
+            pass
 
 
 def set_threads(threads: int | None) -> None:
@@ -452,13 +531,15 @@ def _time_methods(
             _report_once(key, dtype_name, f"{type(error).__name__}: {message}")
             continue
         difference = float("nan") if reference is None else max_relative_difference(values, reference)
+        memory = float("nan")
         if first_call > MAX_CALL_SECONDS:
             SLOW_METHODS[key] = work
-            seconds, repeats = first_call, 1  # includes any one-time compilation
+            seconds, repeats = first_call, 1  # includes any one-time compilation; no extra call for the memory
         else:
             seconds, repeats = best_time(function)
+            memory = PeakMemory.measure(name, function)
         measurements.append(
-            Measurement(dimension, batch, dtype_name, name, seconds / divisor, repeats, difference, update)
+            Measurement(dimension, batch, dtype_name, name, seconds / divisor, repeats, difference, update, memory)
         )
     return measurements
 
@@ -533,33 +614,32 @@ def _ratio_methods(problem: dict, pfapack_c, lrux) -> dict[str, Callable[[], obj
         devices.append("cuda")
     for device in devices:
         suffix = " (CUDA)" if device == "cuda" else ""
-        methods.update({f"{name}{suffix}": method for name, method in _torch_ratio_methods(problem, device).items()})
+        for compiled in (False, True):
+            label = ", compiled" if compiled else ""
+            torch_methods = _torch_ratio_methods(problem, device, compiled)
+            methods.update({f"{name}{label}{suffix}": method for name, method in torch_methods.items()})
     if lrux is not None:
         methods.update(_lrux_ratio_methods(problem, lrux))
     return methods
 
 
-def _torch_ratio_methods(problem: dict, device: str) -> dict[str, Callable[[], object]]:
+def _torch_ratio_methods(problem: dict, device: str, compiled: bool = False) -> dict[str, Callable[[], object]]:
+    # With compiled=True, only the low-rank methods (CompiledLowRankPfaffian, PfaffianUpdater(compiled=True)).
     import torch
 
-    from torch_pfaffian import (
-        PfaffianUpdater,
-        pfaffian,
-        pfaffian_ratio,
-        pfaffian_ratio_and_inverse,
-        pfaffian_ratio_replace,
-        pfaffian_ratio_replace_and_inverse,
-    )
+    from torch_pfaffian import CompiledLowRankPfaffian, LowRankPfaffian, PfaffianUpdater, pfaffian
 
+    backend = CompiledLowRankPfaffian if compiled else LowRankPfaffian
     inverse = problem["inverse"].to(device)
     initial = problem["initial"].to(device)
     methods: dict[str, Callable[[], object]] = {}
     if problem["kind"] == "dense":
-        updated = problem["updated"].to(device)
-        methods["torchpfaffian, new Pfaffian"] = lambda: (pfaffian(updated) / initial).cpu().numpy()
         vectors = problem["update"].to(device)
-        methods["torchpfaffian ratio"] = lambda: pfaffian_ratio(inverse, vectors).cpu().numpy()
-        methods["torchpfaffian ratio + inverse"] = lambda: pfaffian_ratio_and_inverse(inverse, vectors)[0].cpu().numpy()
+        if not compiled:
+            updated = problem["updated"].to(device)
+            methods["torchpfaffian, new Pfaffian"] = lambda: (pfaffian(updated) / initial).cpu().numpy()
+        methods["torchpfaffian ratio"] = lambda: backend.ratio(inverse, vectors).cpu().numpy()
+        methods["torchpfaffian ratio + inverse"] = lambda: backend.ratio_and_inverse(inverse, vectors)[0].cpu().numpy()
         return methods
     indices = [index.to(device) for index in problem["indices"]]
     changes = [change.to(device) for change in problem["changes"]]
@@ -573,23 +653,24 @@ def _torch_ratio_methods(problem: dict, device: str) -> dict[str, Callable[[], o
             last = pfaffian(current)
         return (last / initial).cpu().numpy()
 
-    methods["torchpfaffian, new Pfaffian"] = new_pfaffians
+    if not compiled:
+        methods["torchpfaffian, new Pfaffian"] = new_pfaffians
     if not problem["steps"]:
-        methods["torchpfaffian ratio"] = lambda: pfaffian_ratio_replace(inverse, indices[0], changes[0]).cpu().numpy()
+        methods["torchpfaffian ratio"] = lambda: backend.ratio_replace(inverse, indices[0], changes[0]).cpu().numpy()
         methods["torchpfaffian ratio + inverse"] = lambda: (
-            pfaffian_ratio_replace_and_inverse(inverse, indices[0], changes[0])[0].cpu().numpy()
+            backend.ratio_replace_and_inverse(inverse, indices[0], changes[0])[0].cpu().numpy()
         )
         return methods
 
     def immediate():
         current, product = inverse, None
         for index, change in zip(indices, changes):
-            ratio, current = pfaffian_ratio_replace_and_inverse(current, index, change)
+            ratio, current = backend.ratio_replace_and_inverse(current, index, change)
             product = ratio if product is None else product * ratio
         return product.cpu().numpy()
 
     def delayed():
-        updater = PfaffianUpdater.from_inverse(inverse, max_delay=DELAY)
+        updater = PfaffianUpdater.from_inverse(inverse, max_delay=DELAY, compiled=compiled)
         for index, change in zip(indices, changes):
             updater.accept_replace(index, change)
         return updater.pfaffian.cpu().numpy()
