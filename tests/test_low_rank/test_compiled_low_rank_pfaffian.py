@@ -39,8 +39,8 @@ class TestCompiledLowRankPfaffian:
         generator = torch.Generator().manual_seed(seed)
         return torch.randn(*shape, generator=generator, dtype=torch.float64)
 
-    @pytest.fixture(autouse=True)
-    def _require_compile(self):
+    @pytest.fixture
+    def require_compile(self):
         if not self._compile_works():  # pragma: no cover - depends on the platform
             pytest.skip("torch.compile is not available on this platform")
 
@@ -51,7 +51,7 @@ class TestCompiledLowRankPfaffian:
         assert CompiledLowRankPfaffian._compiled(core) is not core
 
     @pytest.mark.parametrize("width", [2, 4])
-    def test_every_method_matches_the_eager_one(self, width):
+    def test_every_method_matches_the_eager_one(self, require_compile, width):
         matrix = self._skew(BATCH, DIMENSION, DIMENSION)
         inverse = torch.linalg.inv(matrix)
         update = self._random(BATCH, DIMENSION, width)
@@ -71,7 +71,7 @@ class TestCompiledLowRankPfaffian:
             result = getattr(CompiledLowRankPfaffian, name)(*arguments)
             torch.testing.assert_close(result, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
 
-    def test_gradients_match_the_eager_ones(self):
+    def test_gradients_match_the_eager_ones(self, require_compile):
         matrix = self._skew(BATCH, DIMENSION, DIMENSION)
         gradients = []
         for backend in (LowRankPfaffian, CompiledLowRankPfaffian):
@@ -83,7 +83,7 @@ class TestCompiledLowRankPfaffian:
         for compiled, eager in zip(gradients[1], gradients[0]):
             torch.testing.assert_close(compiled, eager, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
 
-    def test_compiled_chain_matches_the_pfaffians_of_the_leading_blocks(self):
+    def test_compiled_chain_matches_the_pfaffians_of_the_leading_blocks(self, require_compile):
         matrix = self._skew(BATCH, 2 * DIMENSION, 2 * DIMENSION)
         chain = PfaffianChain((BATCH,), compiled=True)
         for size in range(2, 2 * DIMENSION + 1, 2):  # a new size at every step: dynamic shapes, not recompiles
@@ -100,7 +100,7 @@ class TestCompiledLowRankPfaffian:
         )
         assert PfaffianChain.from_matrix(matrix, compiled=True)._backend is CompiledLowRankPfaffian
 
-    def test_compiled_updater_matches_the_eager_one(self):
+    def test_compiled_updater_matches_the_eager_one(self, require_compile):
         matrix = self._skew(BATCH, DIMENSION, DIMENSION)
         eager = PfaffianUpdater(matrix, max_delay=3)
         compiled = PfaffianUpdater(matrix, max_delay=3, compiled=True)
@@ -151,3 +151,26 @@ class TestCompiledLowRankPfaffian:
         with pytest.raises(ValueError, match="bad input"):
             CompiledLowRankPfaffian._call(failing_core, torch.zeros(1))
         assert not CompiledLowRankPfaffian._EAGER_CORES
+
+    def test_a_compiled_core_is_called_once_compiled(self, monkeypatch):
+        # Without compiling (no compiler needed): the compiled callable is used, and the core is not run eagerly.
+        calls = []
+
+        def fake_compiled(core):
+            def call(*tensors):
+                calls.append(core)
+                return core(*tensors)
+
+            return call
+
+        monkeypatch.setattr(CompiledLowRankPfaffian, "_compiled", staticmethod(fake_compiled))
+        monkeypatch.setattr(CompiledLowRankPfaffian, "_EAGER_CORES", set())
+        inverse = torch.linalg.inv(self._skew(BATCH, DIMENSION, DIMENSION))
+        update = self._random(BATCH, DIMENSION, 2)
+        torch.testing.assert_close(
+            CompiledLowRankPfaffian.ratio(inverse, update),
+            LowRankPfaffian.ratio(inverse, update),
+            atol=ATOL_SCALAR_COMPARISON,
+            rtol=RTOL_SCALAR_COMPARISON,
+        )
+        assert calls == [LowRankPfaffian._ratio_core]
