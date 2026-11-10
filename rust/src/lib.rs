@@ -902,15 +902,16 @@ fn solve_small<T: LowRankScalar>(matrix: &[T], rows: &[T], width: usize, size: u
     solution
 }
 
-/// Adds ``left^T right`` (``left`` and ``right`` of shape ``(p, n)``) to ``output``, which holds ``A^{-1}`` in the
-/// layout of ``inverse``: a transposed (column-major) one gets ``right^T left``, the transpose, so the buffer is
-/// read and written in order and the caller keeps its layout. One pass over ``output``, row by row.
+/// Writes ``A^{-1} + left^T right`` (``left`` and ``right`` of shape ``(p, n)``) into ``output`` in the layout of
+/// ``inverse``: a transposed (column-major) one gets ``(A^{-1})^T + right^T left``, the transpose, so the buffers
+/// are read and written in order and the caller keeps its layout. One read of ``A^{-1}`` and one write.
 #[inline(always)]
 fn add_outer<T: LowRankScalar>(inverse: Matrix<'_, T>, left: &[T], right: &[T], count: usize, output: &mut [T]) {
     let size = inverse.size;
     let (left, right) = if inverse.transposed { (right, left) } else { (left, right) };
     for row in 0..size {
         let target = &mut output[row * size..(row + 1) * size];
+        target.copy_from_slice(&inverse.data[row * size..(row + 1) * size]);
         for term in 0..count {
             let weight = left[term * size + row];
             let right_row = &right[term * size..(term + 1) * size];
@@ -1069,7 +1070,7 @@ fn low_rank_ratio_and_inverse_batch<'py, T: LowRankScalar + numpy::Element>(
     let (batch, size, width) = (update.shape()[0], update.shape()[1], update.shape()[2]);
     let inverse = inverse.as_slice().expect("C-contiguous inverse");
     let update = update.as_slice().expect("C-contiguous update");
-    let mut output = inverse.to_vec(); // the updates are added in place: one copy of the batch, no zero-fill
+    let mut output = vec![T::zero(); batch * size * size]; // calloc: fresh zero pages, filled row by row
     let ratios = py.allow_threads(|| {
         batch_map_into(&mut output, size * size, |item, chunk| {
             vectorized(|| {
@@ -1138,7 +1139,7 @@ fn replace_ratio_and_inverse_batch<'py, T: LowRankScalar + numpy::Element>(
     let inverse = inverse.as_slice().expect("C-contiguous inverse");
     let index = index.as_slice().expect("contiguous index");
     let change = change.as_slice().expect("C-contiguous change");
-    let mut output = inverse.to_vec(); // the updates are added in place: one copy of the batch, no zero-fill
+    let mut output = vec![T::zero(); batch * size * size]; // calloc: fresh zero pages, filled row by row
     let ratios = py.allow_threads(|| {
         batch_map_into(&mut output, size * size, |item, chunk| {
             vectorized(|| {
