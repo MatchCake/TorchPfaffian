@@ -32,6 +32,12 @@ changes the package's behaviour, API, documentation or packaging.
   inputs still use, runs about a dozen operators per elimination step instead of about thirty (one gather and
   one scatter per swap, two in-place multiply-adds, no zeroing), which makes it 1.1 to 1.7x faster on CUDA
   (`m = 256` with a batch of 256: 77 ms instead of 108 ms).
+- The backward of small CUDA inputs routed to the host (at most 2^13 entries,
+  `RustPfaffianParlettReid.HOST_BACKWARD_MAX_NUMEL`) runs on the host too, about 30% faster for a single
+  `m = 32` or `m = 64` matrix; a double backward stays on the device (#34).
+- `slog_pfaffian()`'s elimination runs about a dozen operators per step, with the same in-place swaps and
+  updates as `PfaffianParlettReid`, which makes it 1.4 to 2x faster on CUDA and keeps it free of host
+  synchronization (#34).
 - `benchmarks/pfapack_comparison.py` is renamed `benchmarks/library_comparison.py`. It also times
   [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
   [lrux](https://github.com/ChenAo-Phys/lrux), runs them and TorchPfaffian on the GPU when CUDA is
