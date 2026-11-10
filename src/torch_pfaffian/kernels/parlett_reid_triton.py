@@ -70,7 +70,9 @@ class ParlettReidTriton:
         block = triton.next_power_of_2(dimension)
         tile = max(1, min(block, ParlettReidTriton.TILE_ENTRIES // block))
         kernel = ParlettReidTriton._kernel()
-        kernel[(batch,)](working, swaps, dimension, BLOCK=block, TILE=tile, num_warps=4 if block <= 128 else 8)
+        kernel[(batch,)](
+            working, swaps, dimension, BLOCK=block, TILE=tile, num_warps=4 if block <= 128 else 8, enable_fp_fusion=True
+        )
         return working, swaps
 
     @staticmethod
