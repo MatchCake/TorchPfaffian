@@ -42,6 +42,23 @@ class TestLowRankPfaffian:
         return entries.to(dtype)
 
     @staticmethod
+    def _per_matrix(core, inverse: torch.Tensor, *arguments: torch.Tensor):
+        # The core on each matrix of the batch on its own: batched LAPACK calls (the solve of R) are not always
+        # correct with some MKL builds (issue #23), unbatched ones are.
+        size = inverse.shape[-1]
+        batch_shape = inverse.shape[:-2]
+        flat = [inverse.reshape(-1, size, size)]
+        for argument in arguments:
+            flat.append(argument.reshape(-1, *argument.shape[len(batch_shape) :]))
+        results = [core(*(tensor[item] for tensor in flat)) for item in range(flat[0].shape[0])]
+        if isinstance(results[0], tuple):
+            return tuple(
+                torch.stack([result[part] for result in results]).reshape(batch_shape + results[0][part].shape)
+                for part in range(len(results[0]))
+            )
+        return torch.stack(results).reshape(batch_shape + results[0].shape)
+
+    @staticmethod
     def _apply_update(matrix: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
         identity = LowRankPfaffian.skew_identity(update.shape[-1] // 2, dtype=update.dtype)
         return matrix - update @ identity @ update.mT
@@ -466,7 +483,7 @@ class TestLowRankPfaffian:
             for inverse in (row_major, column_major):
                 native = LowRankPfaffian._native_call(core, (inverse, *arguments))
                 assert native is not None
-                expected = core(inverse, *arguments)
+                expected = self._per_matrix(core, inverse, *arguments)
                 if not single:
                     torch.testing.assert_close(
                         native, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
@@ -479,7 +496,7 @@ class TestLowRankPfaffian:
                     tensor.to(double) if tensor.is_floating_point() or tensor.is_complex() else tensor
                     for tensor in (inverse, *arguments)
                 ]
-                reference = core(*upcast)
+                reference = self._per_matrix(core, *upcast)
                 for native_part, expected_part, reference_part in zip(
                     *(value if isinstance(value, tuple) else (value,) for value in (native, expected, reference))
                 ):

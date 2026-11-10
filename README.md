@@ -205,7 +205,7 @@ Functions that also return the updated inverse have their own name (`..._and_inv
 - Tutorials: [getting started](https://matchcake.github.io/TorchPfaffian/notebooks/tutorial.html) and
   [domino tilings and dimer probabilities](https://matchcake.github.io/TorchPfaffian/notebooks/domino_tilings.html).
 - Performance against pfapack: [performance](https://matchcake.github.io/TorchPfaffian/performance.html);
-  against pfapack, torchpfaff and lrux: [Benchmarks](#benchmarks).
+  against pfapack, torchpfaff and lrux: the Benchmarks section above.
 - Known limitations (`torch.func`, thread count, half precision): [limitations](https://matchcake.github.io/TorchPfaffian/limitations.html).
 - Changes between versions: [CHANGELOG.md](https://github.com/MatchCake/TorchPfaffian/blob/dev/CHANGELOG.md).
 
