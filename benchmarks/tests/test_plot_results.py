@@ -111,6 +111,43 @@ class TestResultsPlot:
         assert (tmp_path / "overview.png").stat().st_size > 0
         figure = ResultsPlot.overview(full + ratios, "header")
         time_axis, memory_axis = figure.axes
-        assert sum(len(collection.get_offsets()) for collection in time_axis.collections) == len(full + ratios)
-        assert sum(len(collection.get_offsets()) for collection in memory_axis.collections) == len(full + ratios) - 1
-        assert [text.get_text() for text in memory_axis.texts] == ["memory = input size"]
+        points = len(ResultsPlot.relative_to_best(full + ratios))
+        assert sum(len(collection.get_offsets()) for collection in time_axis.collections) == points
+        labels = [text.get_text() for text in time_axis.get_legend().get_texts()]
+        assert labels[0].startswith("torchpfaffian: fastest on 100% of") and "1.0x on average" in labels[0]
+        assert memory_axis.get_legend().get_texts()[0].get_text().startswith("torchpfaffian: leanest on")
+
+    def test_relative_to_best_compares_each_package_at_its_best(self):
+        def measured(method: str, seconds: float, memory: float, update: str = "") -> Measurement:
+            return Measurement(8, 1, "float64", method, seconds, 3, 0.0, update, 1e3 * memory)  # above the floor
+
+        measurements = [
+            measured("pfapack (C)", 2e-3, 1e3),
+            measured("torchpfaffian", 1e-3, 4e3),
+            measured("torchpfaffian (CUDA)", 5e-4, float("nan")),
+            measured("lrux", 4e-3, 2e3),
+            measured("unknown + gradient", 1e-3, 1e3),  # the only package on its input: dropped
+            measured("pfapack (C)", 3e-3, 1e3, "row"),
+            measured("torchpfaffian, new Pfaffian", 2e-3, 1e3, "row"),
+            measured("torchpfaffian ratio", 1e-3, 2e3, "row"),
+            measured("torchpfaffian ratio + inverse", 6e-3, 2e3, "row"),
+            measured("lrux ratio", 5e-4, 4e3, "row"),
+        ]
+        frame = ResultsPlot.relative_to_best(measurements).set_index(["update", "operation", "package"])
+        assert set(frame.index) == {
+            ("", "Pfaffian", "pfapack (C)"),
+            ("", "Pfaffian", "torchpfaffian"),
+            ("", "Pfaffian", "lrux"),
+            ("row", "ratio", "pfapack (C)"),
+            ("row", "ratio", "torchpfaffian"),
+            ("row", "ratio", "lrux"),
+            ("row", "ratio + inverse", "pfapack (C)"),
+            ("row", "ratio + inverse", "torchpfaffian"),
+        }
+        torchpfaffian = frame.loc[("", "Pfaffian", "torchpfaffian")]
+        assert torchpfaffian["device"] == "CUDA" and torchpfaffian["relative_seconds"] == 1.0
+        assert frame.loc[("", "Pfaffian", "lrux"), "relative_seconds"] == 8.0
+        assert torchpfaffian["relative_memory"] == 4.0  # its leanest method, the CPU one
+        assert frame.loc[("row", "ratio", "torchpfaffian"), "relative_seconds"] == 2.0
+        # Without an inverse from lrux, the new Pfaffian (2 ms) is TorchPfaffian's best on "ratio + inverse".
+        assert frame.loc[("row", "ratio + inverse", "torchpfaffian"), "relative_seconds"] == 1.0

@@ -151,10 +151,12 @@ the library, and the line style the device. The figures are saved as PNGs next t
 ~/.venvs/pfaffian-libraries/bin/python benchmarks/plot_results.py benchmarks/results/ratios-*.json --output-directory plots
 ```
 
-`--overview` also saves `overview.png`, one figure with every point of every file given: the time and the peak
-memory of one call against the size of its input in bytes (the batch of matrices, or of inverses for `--ratios`),
-the one axis that means the same for every operation, dtype and batch size. Each package has its own color and
-marker shape, filled on CPU and hollow on CUDA, and a dotted line marks the memory equal to the input size.
+`--overview` also saves `overview.png`, one figure that compares the packages over every point of every file
+given. On each input, each package is taken at its best method and device, and its time and peak memory are
+divided by those of the best package on that input: 1x is the best, 3x three times slower or heavier. The x-axis is
+the input size in bytes, which means the same for every operation, dtype and batch size. Each package has its own
+color and marker shape, filled when its best method ran on CPU and hollow on CUDA, and each legend gives the share
+of inputs on which a package is the best and the geometric mean of its ratio.
 torch's CUDA allocator counts cuBLAS's workspace (about 8 MiB) in every call that multiplies matrices, so small
 CUDA inputs read about 8 MB.
 
