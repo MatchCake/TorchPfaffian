@@ -1,5 +1,6 @@
 import torch
 
+from .compiled_low_rank_pfaffian import CompiledLowRankPfaffian
 from .low_rank_pfaffian import LowRankPfaffian
 
 
@@ -45,16 +46,18 @@ class PfaffianChain:
     float64, complex64 or complex128.
     """
 
+    _backend: type[LowRankPfaffian]
     _inverse: torch.Tensor  # (..., m, m)
     _pfaffian: torch.Tensor  # (...)
 
     @classmethod
-    def from_matrix(cls, matrix: torch.Tensor) -> "PfaffianChain":
+    def from_matrix(cls, matrix: torch.Tensor, *, compiled: bool = False) -> "PfaffianChain":
         """
         Start from a non-empty skew-symmetric matrix, computing its inverse and Pfaffian.
 
         :param matrix: Invertible skew-symmetric matrix of shape ``(..., m, m)``, in float32, float64, complex64
             or complex128.
+        :param compiled: When ``True``, run the steps through ``torch.compile``.
         :return: The chain, whose current matrix is ``matrix``.
         :rtype: PfaffianChain
         :raises ValueError: If ``matrix`` is not square.
@@ -64,7 +67,7 @@ class PfaffianChain:
 
         if matrix.dim() < 2 or matrix.shape[-1] != matrix.shape[-2]:
             raise ValueError(f"matrix must have shape (..., m, m); got {tuple(matrix.shape)}.")
-        chain = cls(matrix.shape[:-2], dtype=matrix.dtype, device=matrix.device)
+        chain = cls(matrix.shape[:-2], dtype=matrix.dtype, device=matrix.device, compiled=compiled)
         inverse = torch.linalg.inv_ex(matrix)[0]  # no host synchronization; non-finite if matrix is singular
         chain._inverse = 0.5 * (inverse - inverse.mT)
         chain._pfaffian = pfaffian(matrix)
@@ -76,6 +79,7 @@ class PfaffianChain:
         *,
         dtype: torch.dtype = torch.float64,
         device: torch.device | str | None = None,
+        compiled: bool = False,
     ) -> None:
         """
         Start from the empty matrix (``m = 0``, Pfaffian 1).
@@ -83,6 +87,9 @@ class PfaffianChain:
         :param batch_shape: Batch shape of the chain, e.g. ``(shots,)``; the first step may broadcast it.
         :param dtype: Dtype of the matrices: float32, float64, complex64 or complex128.
         :param device: Device of the matrices.
+        :param compiled: When ``True``, run the steps through ``torch.compile``
+            (:class:`~torch_pfaffian.low_rank.CompiledLowRankPfaffian`): a few seconds of compilation on the first
+            steps (the growing size is compiled once, as a dynamic shape), then less per-call overhead.
         :raises TypeError: If ``dtype`` is not supported.
         """
         from .. import LU_DTYPES
@@ -90,6 +97,7 @@ class PfaffianChain:
         if dtype not in LU_DTYPES:
             names = ", ".join(str(supported).removeprefix("torch.") for supported in LU_DTYPES)
             raise TypeError(f"PfaffianChain supports {names}; got {dtype}.")
+        self._backend = CompiledLowRankPfaffian if compiled else LowRankPfaffian
         self._inverse = torch.zeros(*batch_shape, 0, 0, dtype=dtype, device=device)
         self._pfaffian = torch.ones(batch_shape, dtype=dtype, device=device)
 
@@ -107,7 +115,7 @@ class PfaffianChain:
         if corners.dim() < 3:
             raise ValueError(f"corners must have shape (..., c, 2k, 2k); got {tuple(corners.shape)}.")
         # Candidates first, so that A^{-1} B is computed once for all of them.
-        ratios = LowRankPfaffian.ratio_extend(self._inverse, border, corners.movedim(-3, 0))
+        ratios = self._backend.ratio_extend(self._inverse, border, corners.movedim(-3, 0))
         return ratios.movedim(0, -1)
 
     def ratio(self, border: torch.Tensor, corner: torch.Tensor) -> torch.Tensor:
@@ -121,7 +129,7 @@ class PfaffianChain:
         :raises ValueError: If the shapes do not match.
         :raises TypeError: If the dtypes or devices differ from those of the chain.
         """
-        return LowRankPfaffian.ratio_extend(self._inverse, border, corner)
+        return self._backend.ratio_extend(self._inverse, border, corner)
 
     def extend(self, border: torch.Tensor, corner: torch.Tensor) -> torch.Tensor:
         """
@@ -134,7 +142,7 @@ class PfaffianChain:
         :raises ValueError: If the shapes do not match.
         :raises TypeError: If the dtypes or devices differ from those of the chain.
         """
-        ratio, self._inverse = LowRankPfaffian.ratio_extend_and_inverse(self._inverse, border, corner)
+        ratio, self._inverse = self._backend.ratio_extend_and_inverse(self._inverse, border, corner)
         self._pfaffian = self._pfaffian * ratio
         return ratio
 

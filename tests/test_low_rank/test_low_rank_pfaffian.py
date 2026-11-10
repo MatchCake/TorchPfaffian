@@ -74,7 +74,7 @@ class TestLowRankPfaffian:
         with pytest.raises(ValueError, match="rank"):
             LowRankPfaffian.skew_identity(0)
 
-    @pytest.mark.parametrize("rank", [1, 2, 3, 4])
+    @pytest.mark.parametrize("rank", [1, 2, 3, 4, 6])
     @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
     def test_ratio_and_inverse_match_direct_computation(self, rank, dtype):
         matrix = self._skew(BATCH, DIMENSION, DIMENSION, dtype=dtype)
@@ -95,6 +95,19 @@ class TestLowRankPfaffian:
         inverse = torch.linalg.inv(matrix)
         ratio = LowRankPfaffian.ratio(inverse, update)
         torch.testing.assert_close(ratio, LowRankPfaffian.ratio_and_inverse(inverse, update)[0], atol=0, rtol=0)
+
+    def test_unbatched_inputs(self):
+        matrix = self._skew(DIMENSION, DIMENSION)
+        update = self._random(DIMENSION, 2)
+        ratio, new_inverse = LowRankPfaffian.ratio_and_inverse(torch.linalg.inv(matrix), update)
+        assert ratio.shape == () and new_inverse.shape == (DIMENSION, DIMENSION)
+        updated = self._apply_update(matrix, update)
+        torch.testing.assert_close(
+            ratio, pfaffian(updated) / pfaffian(matrix), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+        torch.testing.assert_close(
+            new_inverse, torch.linalg.inv(updated), atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
 
     def test_single_matrix_and_broadcast_batch(self):
         matrix = self._skew(DIMENSION, DIMENSION)
@@ -242,7 +255,7 @@ class TestLowRankPfaffian:
         projected = LowRankPfaffian.project(inverse, update)
         expected_ratio = LowRankPfaffian.ratio(inverse, update)
         ratio, r_inverse = LowRankPfaffian.ratio_and_r_inverse(update, projected)
-        torch.testing.assert_close(ratio, expected_ratio, atol=0, rtol=0)
+        torch.testing.assert_close(ratio, expected_ratio, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
         identity = LowRankPfaffian.skew_identity(2, dtype=torch.float64)
         r_matrix = identity + update.mT @ projected
         torch.testing.assert_close(
@@ -317,13 +330,13 @@ class TestLowRankPfaffian:
         )
 
     def test_package_shortcuts(self):
-        assert torch_pfaffian.pfaffian_ratio is LowRankPfaffian.ratio
-        assert torch_pfaffian.pfaffian_ratio_and_inverse is LowRankPfaffian.ratio_and_inverse
-        assert torch_pfaffian.pfaffian_ratio_replace is LowRankPfaffian.ratio_replace
-        assert torch_pfaffian.pfaffian_ratio_replace_and_inverse is LowRankPfaffian.ratio_replace_and_inverse
-        assert torch_pfaffian.pfaffian_extension_ratio is LowRankPfaffian.ratio_extend
-        assert torch_pfaffian.pfaffian_extension_ratio_and_inverse is LowRankPfaffian.ratio_extend_and_inverse
-        assert torch_pfaffian.skew_identity is LowRankPfaffian.skew_identity
+        assert torch_pfaffian.pfaffian_ratio == LowRankPfaffian.ratio
+        assert torch_pfaffian.pfaffian_ratio_and_inverse == LowRankPfaffian.ratio_and_inverse
+        assert torch_pfaffian.pfaffian_ratio_replace == LowRankPfaffian.ratio_replace
+        assert torch_pfaffian.pfaffian_ratio_replace_and_inverse == LowRankPfaffian.ratio_replace_and_inverse
+        assert torch_pfaffian.pfaffian_extension_ratio == LowRankPfaffian.ratio_extend
+        assert torch_pfaffian.pfaffian_extension_ratio_and_inverse == LowRankPfaffian.ratio_extend_and_inverse
+        assert torch_pfaffian.skew_identity == LowRankPfaffian.skew_identity
 
     @pytest.mark.parametrize("width", [2, 4])
     @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])

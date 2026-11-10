@@ -1,3 +1,4 @@
+from .compiled_low_rank_pfaffian import CompiledLowRankPfaffian
 from .low_rank_pfaffian import LowRankPfaffian
 from .pfaffian_chain import PfaffianChain
 from .pfaffian_updater import PfaffianUpdater
