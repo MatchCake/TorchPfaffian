@@ -23,7 +23,9 @@ writing, since torchpfaff needs 3.12 or newer). A library that is not installed 
 A method that fails on an input (for example torchpfaff on complex matrices, which it does not support) is
 skipped, with a note on the first failure of each method and dtype. ``--markdown`` prints a Markdown table
 instead of the terminal one. The results are saved after every input; ``--render <file>`` prints the table of a
-saved (possibly interrupted) run.
+saved (possibly interrupted) run. A method whose single call takes more than ``--max-call-seconds`` (10 s) is
+timed from that call and skipped on larger inputs. torchpfaff's Triton kernel compiles for minutes from m = 64
+(cached on disk afterwards), so its CUDA path is skipped above ``--torchpfaff-cuda-max-size`` (64).
 
 Threads are set through ``OMP_NUM_THREADS``, ``MKL_NUM_THREADS`` and ``RAYON_NUM_THREADS`` before torch is
 imported (never ``torch.set_num_threads``, which corrupts batched LU on some MKL builds; issue #23).
@@ -56,6 +58,14 @@ RIGHT_ALIGNED_COLUMNS = (0, 1, 4, 5, 6)
 FASTEST_MARKER = " ★"
 # Failures already reported, as (method, dtype), so that each one is printed once and not for every size.
 REPORTED_FAILURES: set[tuple[str, str]] = set()
+# A method whose single call takes longer than this is timed from that call only, and skipped on every later
+# input with at least as much work (m^3 * batch), so that one slow library cannot stall the whole run.
+MAX_CALL_SECONDS = 10.0
+# Work (m^3 * batch) at which each method went over MAX_CALL_SECONDS.
+SLOW_METHODS: dict[str, int] = {}
+# torchpfaff's Triton kernel takes minutes to compile from m = 64 (about 100 s on an RTX 3070) and did not
+# finish within several minutes at m = 128, so its CUDA path is only timed up to this size by default.
+TORCHPFAFF_CUDA_MAX_DIMENSION = 64
 
 
 @dataclass
@@ -242,6 +252,11 @@ def _methods(matrices, pfapack_c, pfapack_python, torchpfaff=None, lrux=None) ->
         devices.append((" (CUDA)", matrices.cuda()))
     for suffix, on_device in devices:
         for name, function in libraries.items():
+            if name == "torchpfaff" and suffix and matrices.shape[-1] > TORCHPFAFF_CUDA_MAX_DIMENSION:
+                _report_once(
+                    f"torchpfaff{suffix}", "", f"skipped above m={TORCHPFAFF_CUDA_MAX_DIMENSION} (Triton compile time)"
+                )
+                continue
             methods[f"{name}{suffix}"] = _forward_method(function, on_device)
             methods[f"{name} + gradient{suffix}"] = _gradient_method(function, on_device)
     if lrux is not None:
@@ -329,20 +344,39 @@ def measure(dimension: int, batch: int, dtype_name: str) -> list[Measurement]:
     matrices = general(dimension, batch, getattr(torch, dtype_name), generator)
     methods = _methods(matrices, pfapack_c, pfapack_python, _import_torchpfaff(), _import_lrux())
     reference = methods[REFERENCE_METHOD]() if REFERENCE_METHOD in methods else None
+    work = dimension**3 * batch
     measurements = []
     for name, function in methods.items():
+        if name in SLOW_METHODS and work >= SLOW_METHODS[name]:
+            _report_once(
+                name, "", f"skipped from m^3 * batch = {SLOW_METHODS[name]} (over {MAX_CALL_SECONDS:g} s a call)"
+            )
+            continue
+        print(f"  m={dimension} batch={batch} {dtype_name}: {name}", file=sys.stderr, flush=True)
         try:
+            begin = time.perf_counter()
             values = function()
+            first_call = time.perf_counter() - begin
         except Exception as error:  # a library that does not support this input is skipped, not fatal
-            if (name, dtype_name) not in REPORTED_FAILURES:
-                REPORTED_FAILURES.add((name, dtype_name))
-                message = (str(error).strip().splitlines() or [""])[0]
-                print(f"skipped {name} on {dtype_name}: {type(error).__name__}: {message}", file=sys.stderr)
+            message = (str(error).strip().splitlines() or [""])[0]
+            _report_once(name, dtype_name, f"{type(error).__name__}: {message}")
             continue
         difference = float("nan") if reference is None else max_relative_difference(values, reference)
-        seconds, repeats = best_time(function)
+        if first_call > MAX_CALL_SECONDS:
+            SLOW_METHODS[name] = work
+            seconds, repeats = first_call, 1  # includes any one-time compilation
+        else:
+            seconds, repeats = best_time(function)
         measurements.append(Measurement(dimension, batch, dtype_name, name, seconds, repeats, difference))
     return measurements
+
+
+def _report_once(name: str, dtype_name: str, reason: str) -> None:
+    if (name, dtype_name) in REPORTED_FAILURES:
+        return
+    REPORTED_FAILURES.add((name, dtype_name))
+    where = f" on {dtype_name}" if dtype_name else ""
+    print(f"skipped {name}{where}: {reason}", file=sys.stderr)
 
 
 def _import_pfapack():
@@ -432,6 +466,7 @@ def _header(threads: str) -> str:
 
 
 def main() -> None:
+    global MAX_CALL_SECONDS, TORCHPFAFF_CUDA_MAX_DIMENSION
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--sizes", type=int, nargs="+", default=list(DEFAULT_SIZES), help="matrix dimensions m")
     parser.add_argument("--batches", type=int, nargs="+", default=list(DEFAULT_BATCHES), help="batch sizes")
@@ -439,7 +474,21 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=None, help="threads of torch, MKL and the Rust kernel")
     parser.add_argument("--markdown", action="store_true", help="print a Markdown table instead of a terminal one")
     parser.add_argument("--render", type=Path, default=None, help="print the table of a saved results file and exit")
+    parser.add_argument(
+        "--max-call-seconds",
+        type=float,
+        default=MAX_CALL_SECONDS,
+        help="a method slower than this on one call is skipped on larger inputs",
+    )
+    parser.add_argument(
+        "--torchpfaff-cuda-max-size",
+        type=int,
+        default=TORCHPFAFF_CUDA_MAX_DIMENSION,
+        help="largest m for torchpfaff on CUDA, whose Triton kernel compiles for minutes at large m",
+    )
     arguments = parser.parse_args()
+    MAX_CALL_SECONDS = arguments.max_call_seconds
+    TORCHPFAFF_CUDA_MAX_DIMENSION = arguments.torchpfaff_cuda_max_size
     if arguments.render is not None:
         header, measurements = load_results(arguments.render)
         print(header)

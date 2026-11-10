@@ -160,3 +160,17 @@ class TestLibraryComparison:
         header, loaded = load_results(path)
         assert header == "header"
         assert render_table(loaded) == render_table(measurements)
+
+    def test_measure_skips_slow_methods_on_larger_inputs(self, monkeypatch, capsys):
+        monkeypatch.setattr(library_comparison, "_import_pfapack", lambda: (None, None))
+        monkeypatch.setattr(library_comparison, "_import_torchpfaff", lambda: None)
+        monkeypatch.setattr(library_comparison, "_import_lrux", lambda: None)
+        monkeypatch.setattr(library_comparison, "TIME_BUDGET_SECONDS", 0.0)
+        monkeypatch.setattr(library_comparison, "MAX_CALL_SECONDS", 0.0)  # every call is "slow"
+        monkeypatch.setattr(library_comparison, "SLOW_METHODS", {})
+        monkeypatch.setattr(library_comparison, "REPORTED_FAILURES", set())
+        first = measure(8, 2, "float64")
+        assert first and all(item.repeats == 1 for item in first)  # timed from the single call
+        assert measure(8, 4, "float64") == []  # more work: every method is skipped
+        assert measure(8, 1, "float64")  # less work: timed again
+        assert "skipped torchpfaffian: skipped from m^3 * batch = 1024" in capsys.readouterr().err

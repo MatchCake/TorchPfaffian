@@ -104,7 +104,10 @@ transfer of the result back to the host included. A method that fails on an inpu
 fermix's generic `jax.numpy` fallback, and JAX's CPU threads are not pinned by `--threads`. JAX is told not
 to preallocate GPU memory, so torch and JAX share the GPU. The raw records go to
 `benchmarks/results/libraries-<timestamp>.json`, saved after every input; `--render <file>` prints the table
-of a saved run, including an interrupted one. The documentation's performance page shows a run of it.
+of a saved run, including an interrupted one. A method whose single call takes more than
+`--max-call-seconds` (10 s) is timed from that call and skipped on larger inputs, and torchpfaff's CUDA path
+is skipped above `--torchpfaff-cuda-max-size` (64): its Triton kernel takes about 100 s to compile at m = 64
+and several minutes or more beyond (compiled kernels are then cached on disk). Progress is printed per method. The documentation's performance page shows a run of it.
 Without pfapack, nothing is compared, but the other libraries are still timed.
 
 ## Adding cases
