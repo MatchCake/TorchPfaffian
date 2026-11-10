@@ -184,9 +184,11 @@ def pfaffian(
     bound by its kernel launches there: the matrix is copied to the host and the Pfaffian back, which
     synchronizes with the device, and the backward runs on the device. Larger inputs, and inputs while a
     CUDA graph is being captured, are routed to ``PfaffianParlettReid``, which runs natively on the input
-    device without a host round-trip. All signed strategies compute the correct complex signed Pfaffian
-    without discarding the imaginary part and are differentiable end-to-end for real and complex inputs
-    (the complex backward follows PyTorch's Wirtinger convention).
+    device without a host round-trip; in ``float32`` and ``float64``, with Triton installed, its elimination is
+    a single Triton kernel launch for the whole batch (see
+    :class:`~torch_pfaffian.kernels.ParlettReidTriton`). All signed strategies compute the correct complex
+    signed Pfaffian without discarding the imaginary part and are differentiable end-to-end for real and
+    complex inputs (the complex backward follows PyTorch's Wirtinger convention).
 
     Inputs with ``m > AUTO_SMALL_MAX`` and at least ``AUTO_BLOCK_DET_MIN_NUMEL`` entries in total are tested
     for the block form ``[[0, B], [-B^T, 0]]`` (both diagonal blocks exactly zero for every batch element).

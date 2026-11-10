@@ -38,6 +38,11 @@ changes the package's behaviour, API, documentation or packaging.
   inputs still use, runs about a dozen operators per elimination step instead of about thirty (one gather and
   one scatter per swap, two in-place multiply-adds, no zeroing), which makes it 1.1 to 1.7x faster on CUDA
   (`m = 256` with a batch of 256: 77 ms instead of 108 ms).
+- `ParlettReidTriton`: on CUDA, with Triton installed, `PfaffianParlettReid` eliminates real `float32` and
+  `float64` batches with one Triton kernel launch (one program per matrix) instead of a dozen launches per
+  step, up to `m = 1024` (and below 2^22 entries in `float64`, where the loop is as fast). On an RTX 3070,
+  `float64` batches of 256 take 0.60 ms instead of 4.0 ms at `m = 32` and 2.9 ms instead of 8.0 ms at
+  `m = 64`; `float32` is 2 to 35x faster. Complex inputs keep the PyTorch loop (#34).
 - The backward of small CUDA inputs routed to the host (at most 2^13 entries,
   `RustPfaffianParlettReid.HOST_BACKWARD_MAX_NUMEL`) runs on the host too, about 30% faster for a single
   `m = 32` or `m = 64` matrix; a double backward stays on the device (#34).
