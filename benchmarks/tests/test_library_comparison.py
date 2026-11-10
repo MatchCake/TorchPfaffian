@@ -8,6 +8,7 @@ from library_comparison import (
     load_results,
     max_relative_difference,
     measure,
+    measure_ratios,
     render_table,
     render_terminal_table,
     save_results,
@@ -174,3 +175,40 @@ class TestLibraryComparison:
         assert measure(8, 4, "float64") == []  # more work: every method is skipped
         assert measure(8, 1, "float64")  # less work: timed again
         assert "skipped torchpfaffian: skipped from m^3 * batch = 1024" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("update", list(library_comparison.UPDATES))
+    def test_measure_ratios_agrees_with_a_reference(self, update, monkeypatch):
+        import torch
+
+        import torch_pfaffian
+
+        class FakePfapack:
+            @staticmethod
+            def pfaffian(array: np.ndarray) -> float:
+                return float(torch_pfaffian.pfaffian(torch.from_numpy(array)))
+
+        monkeypatch.setattr(library_comparison, "_import_pfapack", lambda: (FakePfapack, None))
+        monkeypatch.setattr(library_comparison, "TIME_BUDGET_SECONDS", 0.0)
+        measurements = {item.method: item for item in measure_ratios(8, 2, "float64", update)}
+        assert "pfapack (C)" in measurements and "torchpfaffian, new Pfaffian" in measurements
+        assert all(item.update == update for item in measurements.values())
+        assert all(item.max_relative_difference < 1e-10 for item in measurements.values())
+        if update == f"row x{library_comparison.STEPS}":
+            assert f"torchpfaffian, delayed updates (T={library_comparison.DELAY})" in measurements
+        else:
+            assert {"torchpfaffian ratio", "torchpfaffian ratio + inverse"} <= set(measurements)
+
+    def test_ratio_tables_have_an_update_column(self):
+        measurements = [
+            Measurement(8, 4, "float64", "pfapack (C)", 4e-3, 3, 0.0, "row"),
+            Measurement(8, 4, "float64", "torchpfaffian ratio", 1e-3, 3, 1e-15, "row"),
+            Measurement(8, 4, "float64", "pfapack (C)", 2e-3, 3, 0.0, "rank 2"),
+        ]
+        assert "| m | batch | dtype | update | method |" in render_table(measurements)
+        assert "| 8 | 4 | float64 | row | torchpfaffian ratio | 250.0 µs | 4.00x | 1.0e-15 |" in render_table(
+            measurements
+        )
+        lines = render_terminal_table(measurements).splitlines()
+        assert len({len(line) for line in lines}) == 1
+        assert sum(line.startswith("├") for line in lines) == 1  # "row" and "rank 2" are separate blocks
+        assert any("torchpfaffian ratio ★" in line for line in lines)

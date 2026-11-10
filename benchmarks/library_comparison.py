@@ -23,7 +23,8 @@ writing, since torchpfaff needs 3.12 or newer). A library that is not installed 
 A method that fails on an input (for example torchpfaff on complex matrices, which it does not support) is
 skipped, with a note on the first failure of each method and dtype. ``--markdown`` prints a Markdown table
 instead of the terminal one. The results are saved after every input; ``--render <file>`` prints the table of a
-saved (possibly interrupted) run. A method whose single call takes more than ``--max-call-seconds`` (10 s) is
+saved (possibly interrupted) run. ``--ratios`` times Pfaffian ratios under low-rank updates instead (see
+:func:`measure_ratios`). A method whose single call takes more than ``--max-call-seconds`` (10 s) is
 timed from that call and skipped on larger inputs. torchpfaff's Triton kernel compiles for minutes from m = 64
 (cached on disk afterwards), so its CUDA path is skipped above ``--torchpfaff-cuda-max-size`` (64).
 
@@ -66,6 +67,13 @@ SLOW_METHODS: dict[str, int] = {}
 # torchpfaff's Triton kernel takes minutes to compile from m = 64 (about 100 s on an RTX 3070) and did not
 # finish within several minutes at m = 128, so its CUDA path is only timed up to this size by default.
 TORCHPFAFF_CUDA_MAX_DIMENSION = 64
+# --ratios: number of successive accepted updates in the "row x16" case, and the delay of the delayed updates
+# (lrux's tuned value for Pfaffians, arXiv:2602.05255).
+STEPS = 16
+DELAY = 4
+UPDATES = ("rank 2", "rank 4", "row", f"row x{STEPS}")
+DEFAULT_RATIO_SIZES = (32, 128, 512)
+DEFAULT_RATIO_BATCHES = (1, 64)
 
 
 @dataclass
@@ -73,8 +81,10 @@ class Measurement:
     """
     Timing and agreement of one method on one input.
 
-    ``seconds`` is the best time over the repeats for the whole batch. ``max_relative_difference`` compares the
-    method's Pfaffians with those of pfapack's C implementation (``nan`` when pfapack is not available).
+    ``seconds`` is the best time over the repeats for the whole batch (for one update of the batch with
+    ``--ratios``). ``max_relative_difference`` compares the method's Pfaffians (or ratios) with those of
+    pfapack's C implementation (``nan`` when pfapack is not available). ``update`` names the low-rank update of
+    a ``--ratios`` measurement, and is empty for a full Pfaffian.
     """
 
     dimension: int
@@ -84,6 +94,7 @@ class Measurement:
     seconds: float
     repeats: int
     max_relative_difference: float
+    update: str = ""
 
 
 def set_threads(threads: int | None) -> None:
@@ -142,25 +153,28 @@ def table_rows(measurements: list[Measurement]) -> list[tuple[str, ...]]:
     implementation.
 
     :param measurements: Measurements of every method on every input.
-    :return: One tuple of cells per measurement, in the order of ``TABLE_HEADER``.
+    :return: One tuple of cells per measurement, in the order of :func:`table_header`.
     :rtype: list[tuple[str, ...]]
     """
-    reference = {(m.dimension, m.batch, m.dtype): m.seconds for m in measurements if m.method == REFERENCE_METHOD}
+    with_update = _has_updates(measurements)
+    reference = {_group(m): m.seconds for m in measurements if m.method == REFERENCE_METHOD}
     rows = []
     for item in measurements:
         per_matrix = item.seconds / item.batch
-        base = reference.get((item.dimension, item.batch, item.dtype))
+        base = reference.get(_group(item))
         speedup = f"{base / item.seconds:.2f}x" if base else "n/a"
         difference = (
             "n/a"
             if item.max_relative_difference != item.max_relative_difference
             else (f"{item.max_relative_difference:.1e}")
         )
+        update = (item.update,) if with_update else ()
         rows.append(
             (
                 str(item.dimension),
                 str(item.batch),
                 item.dtype,
+                *update,
                 item.method,
                 _format_seconds(per_matrix),
                 speedup,
@@ -168,6 +182,27 @@ def table_rows(measurements: list[Measurement]) -> list[tuple[str, ...]]:
             )
         )
     return rows
+
+
+def table_header(measurements: list[Measurement]) -> tuple[str, ...]:
+    """
+    Column names of :func:`table_rows`: ``TABLE_HEADER``, with an ``update`` column for ``--ratios`` runs.
+
+    :param measurements: Measurements of every method on every input.
+    :return: The column names.
+    :rtype: tuple[str, ...]
+    """
+    if not _has_updates(measurements):
+        return TABLE_HEADER
+    return (*TABLE_HEADER[:3], "update", *TABLE_HEADER[3:])
+
+
+def _has_updates(measurements: list[Measurement]) -> bool:
+    return any(item.update for item in measurements)
+
+
+def _group(item: Measurement) -> tuple[int, int, str, str]:
+    return item.dimension, item.batch, item.dtype, item.update
 
 
 def render_table(measurements: list[Measurement]) -> str:
@@ -178,7 +213,8 @@ def render_table(measurements: list[Measurement]) -> str:
     :return: The table.
     :rtype: str
     """
-    lines = ["| " + " | ".join(TABLE_HEADER) + " |", "|" + "---|" * len(TABLE_HEADER)]
+    header = table_header(measurements)
+    lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     lines.extend("| " + " | ".join(row) + " |" for row in table_rows(measurements))
     return "\n".join(lines)
 
@@ -192,25 +228,29 @@ def render_terminal_table(measurements: list[Measurement]) -> str:
     :return: The table.
     :rtype: str
     """
+    header = table_header(measurements)
+    shift = len(header) - len(TABLE_HEADER)  # 1 with the update column
+    method_column = 3 + shift
+    right_aligned = tuple(column + shift if column > 2 else column for column in RIGHT_ALIGNED_COLUMNS)
     rows = table_rows(measurements)
-    groups: dict[tuple[int, int, str], list[int]] = {}
+    groups: dict[tuple[int, int, str, str], list[int]] = {}
     for index, item in enumerate(measurements):
-        groups.setdefault((item.dimension, item.batch, item.dtype), []).append(index)
+        groups.setdefault(_group(item), []).append(index)
     for indices in groups.values():
         fastest = min(indices, key=lambda index: measurements[index].seconds)
         cells = list(rows[fastest])
-        cells[3] += FASTEST_MARKER
+        cells[method_column] += FASTEST_MARKER
         rows[fastest] = tuple(cells)
-    widths = [max(len(row[column]) for row in [TABLE_HEADER, *rows]) for column in range(len(TABLE_HEADER))]
+    widths = [max(len(row[column]) for row in [header, *rows]) for column in range(len(header))]
 
     def border(left: str, middle: str, right: str) -> str:
         return left + middle.join("─" * (width + 2) for width in widths) + right
 
-    lines = [border("┌", "┬", "┐"), _terminal_line(TABLE_HEADER, widths, ()), border("╞", "╪", "╡")]
+    lines = [border("┌", "┬", "┐"), _terminal_line(header, widths, ()), border("╞", "╪", "╡")]
     for group_index, indices in enumerate(groups.values()):
         if group_index:
             lines.append(border("├", "┼", "┤"))
-        lines.extend(_terminal_line(rows[index], widths, RIGHT_ALIGNED_COLUMNS) for index in indices)
+        lines.extend(_terminal_line(rows[index], widths, right_aligned) for index in indices)
     lines.append(border("└", "┴", "┘"))
     return "\n".join(lines)
 
@@ -344,31 +384,296 @@ def measure(dimension: int, batch: int, dtype_name: str) -> list[Measurement]:
     matrices = general(dimension, batch, getattr(torch, dtype_name), generator)
     methods = _methods(matrices, pfapack_c, pfapack_python, _import_torchpfaff(), _import_lrux())
     reference = methods[REFERENCE_METHOD]() if REFERENCE_METHOD in methods else None
+    return _time_methods(methods, reference, dimension, batch, dtype_name)
+
+
+def measure_ratios(dimension: int, batch: int, dtype_name: str, update: str) -> list[Measurement]:
+    """
+    Time Pfaffian ratios under one kind of low-rank update (``--ratios``), and compare them with pfapack.
+
+    Every method starts from the same random matrices ``A`` (the ``general`` family) and the inverse ``A^{-1}``,
+    which a Monte Carlo loop keeps from one step to the next:
+
+    - ``"rank 2"`` and ``"rank 4"``: one dense update ``A - u J u^T`` with ``u`` of shape ``(n, 2)`` or
+      ``(n, 4)``;
+    - ``"row"``: one row and column replaced (the typical Monte Carlo move);
+    - ``f"row x{STEPS}"``: ``STEPS`` successive row replacements, each accepted, with the immediate update of
+      the inverse and with delayed updates (``max_delay = DELAY``). Times are per update.
+
+    The reference, ``pfapack (C)``, forms each updated matrix and computes its Pfaffian, divided by the cached
+    Pfaffian of ``A``: what a caller without low-rank updates does.
+
+    :param dimension: Matrix dimension ``n``.
+    :param batch: Number of matrices.
+    :param dtype_name: ``float64`` or ``complex128``.
+    :param update: One of ``UPDATES``.
+    :return: One measurement per method that supports the input.
+    :rtype: list[Measurement]
+    """
+    import torch
+    from cases import general
+
+    pfapack_c, _ = _import_pfapack()
+    generator = torch.Generator().manual_seed(dimension * 1000 + batch)
+    matrices = general(dimension, batch, getattr(torch, dtype_name), generator)
+    problem = _ratio_problem(matrices, update, generator)
+    methods = _ratio_methods(problem, pfapack_c, _import_lrux())
+    reference = methods[REFERENCE_METHOD]() if REFERENCE_METHOD in methods else None
+    divisor = STEPS if problem["steps"] else 1
+    return _time_methods(methods, reference, dimension, batch, dtype_name, update, divisor)
+
+
+def _time_methods(
+    methods: dict[str, Callable[[], object]],
+    reference,
+    dimension: int,
+    batch: int,
+    dtype_name: str,
+    update: str = "",
+    divisor: int = 1,
+) -> list[Measurement]:
     work = dimension**3 * batch
+    label = f"m={dimension} batch={batch} {dtype_name}" + (f" {update}" if update else "")
     measurements = []
     for name, function in methods.items():
-        if name in SLOW_METHODS and work >= SLOW_METHODS[name]:
+        key = f"{name} [{update}]" if update else name
+        if key in SLOW_METHODS and work >= SLOW_METHODS[key]:
             _report_once(
-                name, "", f"skipped from m^3 * batch = {SLOW_METHODS[name]} (over {MAX_CALL_SECONDS:g} s a call)"
+                key, "", f"skipped from m^3 * batch = {SLOW_METHODS[key]} (over {MAX_CALL_SECONDS:g} s a call)"
             )
             continue
-        print(f"  m={dimension} batch={batch} {dtype_name}: {name}", file=sys.stderr, flush=True)
+        print(f"  {label}: {name}", file=sys.stderr, flush=True)
         try:
             begin = time.perf_counter()
             values = function()
             first_call = time.perf_counter() - begin
         except Exception as error:  # a library that does not support this input is skipped, not fatal
             message = (str(error).strip().splitlines() or [""])[0]
-            _report_once(name, dtype_name, f"{type(error).__name__}: {message}")
+            _report_once(key, dtype_name, f"{type(error).__name__}: {message}")
             continue
         difference = float("nan") if reference is None else max_relative_difference(values, reference)
         if first_call > MAX_CALL_SECONDS:
-            SLOW_METHODS[name] = work
+            SLOW_METHODS[key] = work
             seconds, repeats = first_call, 1  # includes any one-time compilation
         else:
             seconds, repeats = best_time(function)
-        measurements.append(Measurement(dimension, batch, dtype_name, name, seconds, repeats, difference))
+        measurements.append(
+            Measurement(dimension, batch, dtype_name, name, seconds / divisor, repeats, difference, update)
+        )
     return measurements
+
+
+def _ratio_problem(matrices, update: str, generator) -> dict:
+    # The inputs of one --ratios case, on CPU: the inverse, the updates and the updated matrices.
+    import torch
+    from cases import _general_scale, _random
+
+    from torch_pfaffian import pfaffian, skew_identity
+
+    batch, dimension = matrices.shape[0], matrices.shape[-1]
+    scale = _general_scale(dimension)
+    inverse = torch.linalg.inv(matrices)
+    inverse = 0.5 * (inverse - inverse.mT)
+    problem = {"matrices": matrices, "inverse": inverse, "initial": pfaffian(matrices), "steps": False}
+    if update.startswith("rank"):
+        rank = int(update.split()[1])
+        vectors = _random((batch, dimension, rank), matrices.dtype, generator, scale**0.5)
+        identity = skew_identity(rank // 2, dtype=matrices.dtype)
+        problem.update(kind="dense", update=vectors, updated=matrices - vectors @ identity @ vectors.mT)
+        return problem
+    count = STEPS if update == f"row x{STEPS}" else 1
+    rows = torch.arange(batch)
+    indices, changes = [], []
+    for _ in range(count):
+        index = torch.randint(0, dimension, (batch,), generator=generator)
+        change = _random((batch, dimension), matrices.dtype, generator, scale)
+        change[rows, index] = 0
+        indices.append(index)
+        changes.append(change)
+    problem.update(kind="row", indices=indices, changes=changes, steps=count > 1)
+    return problem
+
+
+def _replace_rows(matrices, index, change, rows) -> None:
+    # In place: row index of each matrix gains change, and its column loses it (a NumPy or torch batch).
+    matrices[rows, index, :] += change
+    matrices[rows, :, index] -= change
+
+
+def _ratio_methods(problem: dict, pfapack_c, lrux) -> dict[str, Callable[[], object]]:
+    import numpy as np
+    import torch
+
+    methods: dict[str, Callable[[], object]] = {}
+    if pfapack_c is not None:
+        matrices = problem["matrices"].numpy()
+        initial = np.array([pfapack_c.pfaffian(np.ascontiguousarray(array)) for array in matrices])
+        if problem["kind"] == "dense":
+            updated = [np.ascontiguousarray(array) for array in problem["updated"].numpy()]
+
+            def new_pfaffians():
+                return np.array([pfapack_c.pfaffian(array) for array in updated]) / initial
+
+        else:
+            steps = [(index.numpy(), change.numpy()) for index, change in zip(problem["indices"], problem["changes"])]
+            rows = np.arange(matrices.shape[0])
+
+            def new_pfaffians():
+                # Form each updated matrix and compute its Pfaffian; the last over the first is the product of
+                # the ratios.
+                current = matrices.copy()
+                for index, change in steps:
+                    _replace_rows(current, index, change, rows)
+                    last = np.array([pfapack_c.pfaffian(np.ascontiguousarray(array)) for array in current])
+                return last / initial
+
+        methods[REFERENCE_METHOD] = new_pfaffians
+    devices = ["cpu"]
+    if torch.cuda.is_available():  # pragma: no cover - needs a GPU
+        devices.append("cuda")
+    for device in devices:
+        suffix = " (CUDA)" if device == "cuda" else ""
+        methods.update({f"{name}{suffix}": method for name, method in _torch_ratio_methods(problem, device).items()})
+    if lrux is not None:
+        methods.update(_lrux_ratio_methods(problem, lrux))
+    return methods
+
+
+def _torch_ratio_methods(problem: dict, device: str) -> dict[str, Callable[[], object]]:
+    import torch
+
+    from torch_pfaffian import (
+        PfaffianUpdater,
+        pfaffian,
+        pfaffian_ratio,
+        pfaffian_ratio_and_inverse,
+        pfaffian_ratio_replace,
+        pfaffian_ratio_replace_and_inverse,
+    )
+
+    inverse = problem["inverse"].to(device)
+    initial = problem["initial"].to(device)
+    methods: dict[str, Callable[[], object]] = {}
+    if problem["kind"] == "dense":
+        updated = problem["updated"].to(device)
+        methods["torchpfaffian, new Pfaffian"] = lambda: (pfaffian(updated) / initial).cpu().numpy()
+        vectors = problem["update"].to(device)
+        methods["torchpfaffian ratio"] = lambda: pfaffian_ratio(inverse, vectors).cpu().numpy()
+        methods["torchpfaffian ratio + inverse"] = lambda: pfaffian_ratio_and_inverse(inverse, vectors)[0].cpu().numpy()
+        return methods
+    indices = [index.to(device) for index in problem["indices"]]
+    changes = [change.to(device) for change in problem["changes"]]
+    matrices = problem["matrices"].to(device)
+    rows = torch.arange(matrices.shape[0], device=device)
+
+    def new_pfaffians():
+        current = matrices.clone()
+        for index, change in zip(indices, changes):
+            _replace_rows(current, index, change, rows)
+            last = pfaffian(current)
+        return (last / initial).cpu().numpy()
+
+    methods["torchpfaffian, new Pfaffian"] = new_pfaffians
+    if not problem["steps"]:
+        methods["torchpfaffian ratio"] = lambda: pfaffian_ratio_replace(inverse, indices[0], changes[0]).cpu().numpy()
+        methods["torchpfaffian ratio + inverse"] = lambda: (
+            pfaffian_ratio_replace_and_inverse(inverse, indices[0], changes[0])[0].cpu().numpy()
+        )
+        return methods
+
+    def immediate():
+        current, product = inverse, None
+        for index, change in zip(indices, changes):
+            ratio, current = pfaffian_ratio_replace_and_inverse(current, index, change)
+            product = ratio if product is None else product * ratio
+        return product.cpu().numpy()
+
+    def delayed():
+        updater = PfaffianUpdater.from_inverse(inverse, max_delay=DELAY)
+        for index, change in zip(indices, changes):
+            updater.accept_replace(index, change)
+        return updater.pfaffian.cpu().numpy()
+
+    methods["torchpfaffian, immediate updates"] = immediate
+    methods[f"torchpfaffian, delayed updates (T={DELAY})"] = delayed
+    return methods
+
+
+def _lrux_ratio_methods(problem: dict, lrux) -> dict[str, Callable[[], object]]:
+    from lrux import PfCarrier, merge_pf_delays, pf_lru, pf_lru_delayed
+
+    jax, _ = lrux
+    numpy = jax.numpy
+    devices = [("", jax.devices("cpu")[0])]
+    try:
+        devices.append((" (CUDA)", jax.devices("gpu")[0]))  # pragma: no cover - needs a GPU
+    except RuntimeError:
+        pass
+    methods: dict[str, Callable[[], object]] = {}
+    for suffix, device in devices:
+
+        def put(tensor, device=device):
+            return jax.device_put(tensor.numpy(), device)
+
+        inverse = put(problem["inverse"])
+        if problem["kind"] == "dense":
+            vectors = put(problem["update"])
+            ratio = jax.jit(jax.vmap(pf_lru))
+            with_inverse = jax.jit(jax.vmap(lambda a, u: pf_lru(a, u, True)))
+            methods[f"lrux ratio{suffix}"] = _jax_call(lambda r=ratio, a=inverse, u=vectors: r(a, u))
+            methods[f"lrux ratio + inverse{suffix}"] = _jax_call(
+                lambda f=with_inverse, a=inverse, u=vectors: f(a, u)[0]
+            )
+            continue
+        indices = [put(index) for index in problem["indices"]]
+        changes = [put(change) for change in problem["changes"]]
+        ratio = jax.jit(jax.vmap(lambda a, x, e: pf_lru(a, (x, e))))
+        with_inverse = jax.jit(jax.vmap(lambda a, x, e: pf_lru(a, (x, e), True)))
+        if not problem["steps"]:
+            methods[f"lrux ratio{suffix}"] = _jax_call(
+                lambda r=ratio, a=inverse, x=changes[0], e=indices[0]: r(a, x, e)
+            )
+            methods[f"lrux ratio + inverse{suffix}"] = _jax_call(
+                lambda f=with_inverse, a=inverse, x=changes[0], e=indices[0]: f(a, x, e)[0]
+            )
+            continue
+
+        def immediate(f=with_inverse, a=inverse, xs=changes, es=indices):
+            product = None
+            for x, e in zip(xs, es):
+                ratio_value, a = f(a, x, e)
+                product = ratio_value if product is None else product * ratio_value
+            return product
+
+        steps = {
+            delay: jax.jit(
+                jax.vmap(lambda c, x, e, t=delay: pf_lru_delayed(c, (x, e), return_update=True, current_delay=t))
+            )
+            for delay in range(DELAY)
+        }
+        merge = jax.jit(jax.vmap(merge_pf_delays))
+        batch, dimension = problem["inverse"].shape[0], problem["inverse"].shape[-1]
+
+        def delayed(steps=steps, merge=merge, a=inverse, xs=changes, es=indices, device=device):
+            zeros = numpy.zeros((batch, DELAY, dimension, 2), a.dtype, device=device)
+            carrier = PfCarrier(a, zeros, numpy.zeros((batch, DELAY, 2, 2), a.dtype, device=device))
+            product = None
+            for step, (x, e) in enumerate(zip(xs, es)):
+                ratio_value, carrier = steps[step % DELAY](carrier, x, e)
+                if step % DELAY == DELAY - 1:
+                    carrier = merge(carrier)
+                product = ratio_value if product is None else product * ratio_value
+            return product
+
+        methods[f"lrux, immediate updates{suffix}"] = _jax_call(immediate)
+        methods[f"lrux, delayed updates (T={DELAY}){suffix}"] = _jax_call(delayed)
+    return methods
+
+
+def _jax_call(function: Callable[[], object]) -> Callable[[], object]:
+    import numpy as np
+
+    return lambda: np.asarray(function())  # np.asarray waits for the device
 
 
 def _report_once(name: str, dtype_name: str, reason: str) -> None:
@@ -468,8 +773,10 @@ def _header(threads: str) -> str:
 def main() -> None:
     global MAX_CALL_SECONDS, TORCHPFAFF_CUDA_MAX_DIMENSION
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--sizes", type=int, nargs="+", default=list(DEFAULT_SIZES), help="matrix dimensions m")
-    parser.add_argument("--batches", type=int, nargs="+", default=list(DEFAULT_BATCHES), help="batch sizes")
+    parser.add_argument("--sizes", type=int, nargs="+", default=None, help="matrix dimensions m")
+    parser.add_argument("--batches", type=int, nargs="+", default=None, help="batch sizes")
+    parser.add_argument("--ratios", action="store_true", help="time Pfaffian ratios under low-rank updates")
+    parser.add_argument("--updates", nargs="+", default=list(UPDATES), choices=list(UPDATES), help="with --ratios")
     parser.add_argument("--dtypes", nargs="+", default=list(DEFAULT_DTYPES), choices=list(DEFAULT_DTYPES))
     parser.add_argument("--threads", type=int, default=None, help="threads of torch, MKL and the Rust kernel")
     parser.add_argument("--markdown", action="store_true", help="print a Markdown table instead of a terminal one")
@@ -487,6 +794,8 @@ def main() -> None:
         help="largest m for torchpfaff on CUDA, whose Triton kernel compiles for minutes at large m",
     )
     arguments = parser.parse_args()
+    sizes = arguments.sizes or list(DEFAULT_RATIO_SIZES if arguments.ratios else DEFAULT_SIZES)
+    batches = arguments.batches or list(DEFAULT_RATIO_BATCHES if arguments.ratios else DEFAULT_BATCHES)
     MAX_CALL_SECONDS = arguments.max_call_seconds
     TORCHPFAFF_CUDA_MAX_DIMENSION = arguments.torchpfaff_cuda_max_size
     if arguments.render is not None:
@@ -506,16 +815,22 @@ def main() -> None:
         print("lrux is not installed: it is not timed. See the module docstring.", file=sys.stderr)
     print(header, flush=True)
     RESULTS_DIRECTORY.mkdir(exist_ok=True)
-    output = RESULTS_DIRECTORY / f"libraries-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    prefix = "ratios" if arguments.ratios else "libraries"
+    output = RESULTS_DIRECTORY / f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}.json"
     # Saved after every input, so that an interrupted run keeps its results (see --render).
     print(f"Raw results: {output}", file=sys.stderr)
     measurements: list[Measurement] = []
+    updates = arguments.updates if arguments.ratios else [""]
     for dtype_name in arguments.dtypes:
-        for dimension in arguments.sizes:
-            for batch in arguments.batches:
-                measurements.extend(measure(dimension, batch, dtype_name))
-                save_results(output, header, measurements)
-                print(f"done m={dimension} batch={batch} {dtype_name}", file=sys.stderr, flush=True)
+        for update in updates:
+            for dimension in sizes:
+                for batch in batches:
+                    if update:
+                        measurements.extend(measure_ratios(dimension, batch, dtype_name, update))
+                    else:
+                        measurements.extend(measure(dimension, batch, dtype_name))
+                    save_results(output, header, measurements)
+                    print(f"done m={dimension} batch={batch} {dtype_name} {update}", file=sys.stderr, flush=True)
     print(render_table(measurements) if arguments.markdown else render_terminal_table(measurements))
 
 

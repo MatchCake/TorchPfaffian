@@ -110,6 +110,29 @@ is skipped above `--torchpfaff-cuda-max-size` (64): its Triton kernel takes abou
 and several minutes or more beyond (compiled kernels are then cached on disk). Progress is printed per method. The documentation's performance page shows a run of it.
 Without pfapack, nothing is compared, but the other libraries are still timed.
 
+### Pfaffian ratios (`--ratios`)
+
+`--ratios` times Pfaffian ratios under low-rank updates instead of full Pfaffians: TorchPfaffian's
+`LowRankPfaffian` and `PfaffianUpdater` against lrux's `pf_lru` and `pf_lru_delayed` (jitted and vmapped),
+and against forming each updated matrix and computing its Pfaffian (pfapack, the reference, and
+TorchPfaffian). Every method starts from the same matrices and their inverse. The `update` column is:
+
+| update | move |
+|---|---|
+| `rank 2`, `rank 4` | one dense update `A - u J u^T`, with `u` of shape `(n, 2)` or `(n, 4)` |
+| `row` | one row and column replaced, the usual Monte Carlo move |
+| `row x16` | 16 successive accepted row replacements, with immediate and delayed (`T = 4`) inverse updates; times are per update |
+
+`ratio` rows compute the ratio only; `ratio + inverse` rows also update the inverse, which the next move needs.
+The defaults are `--sizes 32 128 512 --batches 1 64`, and `--updates` selects the moves:
+
+```bash
+~/.venvs/pfaffian-libraries/bin/python benchmarks/library_comparison.py --ratios --threads 1
+~/.venvs/pfaffian-libraries/bin/python benchmarks/library_comparison.py --ratios --updates row "row x16" --sizes 512
+```
+
+The raw records go to `benchmarks/results/ratios-<timestamp>.json`.
+
 ## Adding cases
 
 Add a matrix family to `FAMILIES` in `cases.py` (for example the input of a bug you just fixed), or a size to

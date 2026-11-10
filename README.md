@@ -118,6 +118,55 @@ pfaffian(matrix).sum().backward()     # matrix.grad = Pf(A) A^{-T} / 2 per batch
 phase, log_abs = slog_pfaffian(matrix.detach())  # log domain, never overflows
 ```
 
+### Pfaffian ratios under low-rank updates
+
+Monte Carlo moves and neural quantum states often only need `Pf(A') / Pf(A)` for a matrix `A'` that differs
+from `A` by a few rows and columns. Given `A^{-1}`, `LowRankPfaffian` computes that ratio in `O(n^2 k)`
+(`O(n)` for one replaced row) instead of the `O(n^3)` of a new Pfaffian, together with the updated inverse.
+It follows the convention of [lrux](https://github.com/ChenAo-Phys/lrux): `A' = A - u J u^T` with `u` of shape
+`(n, 2k)` and `J = [[0, I_k], [-I_k, 0]]`.
+
+```python
+from torch_pfaffian import PfaffianUpdater, pfaffian_ratio, pfaffian_ratio_replace_and_inverse
+
+inverse = torch.linalg.inv(matrix.detach())                 # (32, 10, 10)
+update = torch.randn(32, 10, 2, dtype=torch.float64)       # rank-2 update u = (x, y)
+ratio = pfaffian_ratio(inverse, update)                     # Pf(A - u J u^T) / Pf(A)
+change = torch.randn(32, 10, dtype=torch.float64)
+ratio, new_inverse = pfaffian_ratio_replace_and_inverse(inverse, 3, change)  # row and column 3 change
+
+updater = PfaffianUpdater(matrix.detach(), max_delay=4)    # delayed inverse updates for long chains
+accepted = torch.rand(32) < updater.ratio(update).abs() ** 2
+updater.accept(update, mask=accepted)                       # only the accepted walkers move
+```
+
+For a matrix that grows block by block, as in qubit-by-qubit sampling of matchgate circuits,
+`pfaffian_extension_ratio` gives `Pf([[A, B], [-B^T, C]]) / Pf(A) = Pf(C + B^T A^{-1} B)` from `A^{-1}`, and
+`PfaffianChain` keeps the inverse from one qubit to the next, so that a sample of `n` qubits costs `O(n^3)`
+instead of `O(n^4)`:
+
+```python
+from torch_pfaffian import PfaffianChain
+
+chain = PfaffianChain((shots,))                              # starts from the empty matrix
+for qubit in range(n_qubits):
+    modes = slice(2 * qubit, 2 * qubit + 2)
+    border = covariance[..., : 2 * qubit, modes]             # (shots, 2 qubit, 2)
+    corners = covariance[..., modes, modes] + outcome_blocks # (shots, 2, 2, 2): the blocks for y = 0 and 1
+    probabilities = chain.ratios(border, corners).abs() / 2  # conditional probabilities, (shots, 2)
+    outcome = torch.multinomial(probabilities, 1)[..., 0]
+    chain.extend(border, corners[torch.arange(shots), outcome])
+```
+
+Everything is batched, differentiable, and runs on CPU and CUDA. Gradients are exact for any skew-symmetric
+construction of the inputs, such as a covariance matrix computed from circuit parameters; the gradient with
+respect to a raw `inverse` leaf follows the skew-split convention of `pfaffian()`, while those with respect to
+blocks sliced from a leaf matrix (`border`, `corner`) are only meaningful in their skew-symmetric part.
+Functions that also return the updated inverse have their own name (`..._and_inverse`) rather than a flag.
+`pfaffian_ratio`, `pfaffian_ratio_and_inverse`, `pfaffian_ratio_replace`,
+`pfaffian_ratio_replace_and_inverse`, `pfaffian_extension_ratio`, `pfaffian_extension_ratio_and_inverse` and
+`skew_identity` are shortcuts to the static methods of `LowRankPfaffian`.
+
 
 # Important Links
 - Documentation: [https://matchcake.github.io/TorchPfaffian/](https://matchcake.github.io/TorchPfaffian/).
@@ -154,8 +203,9 @@ entry from the [Zenodo record](https://doi.org/10.5281/zenodo.24085345).
 TorchPfaffian is compared against [pfapack](https://github.com/basnijholt/pfapack),
 [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
 [lrux](https://github.com/ChenAo-Phys/lrux) in `benchmarks/library_comparison.py`. lrux, in JAX, computes
-determinant and Pfaffian ratios under low-rank updates, the inner loop of fermionic Monte Carlo
-([#33](https://github.com/MatchCake/TorchPfaffian/issues/33) tracks the same feature in TorchPfaffian).
+determinant and Pfaffian ratios under low-rank updates, the inner loop of fermionic Monte Carlo;
+TorchPfaffian's `LowRankPfaffian` and `PfaffianUpdater` implement the same Pfaffian updates in PyTorch
+([#33](https://github.com/MatchCake/TorchPfaffian/issues/33)), and `--ratios` compares them with lrux.
 If you use torchpfaff or lrux, please cite them as well:
 ```
 @software{adams_torchpfaff,

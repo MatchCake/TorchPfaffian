@@ -21,6 +21,7 @@ from collections.abc import Callable
 import torch
 
 from .kernels import log_magnitude_pfaffian, magnitude_pfaffian
+from .low_rank import LowRankPfaffian, PfaffianChain, PfaffianUpdater
 from .strategies import *
 from .utils import get_all_subclasses
 
@@ -86,6 +87,16 @@ def _warn_upcast(function_name: str, dtype: torch.dtype, stacklevel: int) -> Non
         stacklevel=stacklevel + 1,
     )
 
+
+# Public shortcuts to the low-rank updates, next to pfaffian() and slog_pfaffian(). pfaffian_extension_ratio is
+# the ratio of a matrix grown by a few rows and columns (qubit-by-qubit sampling); see LowRankPfaffian.ratio_extend.
+pfaffian_ratio = LowRankPfaffian.ratio
+pfaffian_ratio_and_inverse = LowRankPfaffian.ratio_and_inverse
+pfaffian_ratio_replace = LowRankPfaffian.ratio_replace
+pfaffian_ratio_replace_and_inverse = LowRankPfaffian.ratio_replace_and_inverse
+pfaffian_extension_ratio = LowRankPfaffian.ratio_extend
+pfaffian_extension_ratio_and_inverse = LowRankPfaffian.ratio_extend_and_inverse
+skew_identity = LowRankPfaffian.skew_identity
 
 pfaffian_strategy_map = {_cls.NAME.lower().strip(): _cls for _cls in get_all_subclasses(PfaffianStrategy)}
 

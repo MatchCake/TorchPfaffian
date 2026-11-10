@@ -7,6 +7,22 @@ changes the package's behaviour, API, documentation or packaging.
 
 ## [Unreleased]
 
+### Added
+
+- `LowRankPfaffian`: Pfaffian ratios `Pf(A - u J u^T) / Pf(A)` and updated inverses from `A^{-1}`, in
+  `O(n^2 k)`, and the `O(n)` ratio of a row and column replacement (`ratio_replace`), as in
+  [lrux](https://github.com/ChenAo-Phys/lrux), plus the ratio of a matrix grown by `2k` rows and columns,
+  `Pf(C + B^T A^{-1} B)` (`ratio_extend`). Each has a `..._and_inverse` variant that also returns the
+  updated inverse. Batched, differentiable, CPU and CUDA, without host synchronization; shortcuts
+  `pfaffian_ratio`, `pfaffian_ratio_replace`, `pfaffian_extension_ratio` (the growth ratio), their
+  `_and_inverse` variants, and `skew_identity` (#33). Gradients with respect to a raw `inverse` follow the
+  skew-split convention of `pfaffian()` (`SkewGradient`).
+- `PfaffianChain`: the Pfaffians of a matrix grown block by block, with the ratios of candidate blocks, for
+  qubit-by-qubit sampling of matchgate circuits in `O(n^3)` per sample (MatchCake).
+- `PfaffianUpdater`: chains of accepted low-rank updates with delayed inverse updates, per-walker
+  acceptance masks, and a running Pfaffian (#33).
+- `benchmarks/library_comparison.py --ratios`: Pfaffian ratios against lrux and full recomputation (#33).
+
 ### Changed
 
 - `benchmarks/pfapack_comparison.py` is renamed `benchmarks/library_comparison.py`. It also times
