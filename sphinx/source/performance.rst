@@ -12,7 +12,7 @@ the batch in one call; pfapack is called on each matrix. "torchpfaffian + gradie
 pass, which pfapack does not offer. The speed-up is the pfapack time divided by the TorchPfaffian time.
 
 Measured with torchpfaffian 0.0.6 (development build), torch 2.15.0+cpu, numpy 2.5.4, pfapack 1.1.1, on Python 3.12.2 on Linux-7.0.0-42-generic-x86_64-with-glibc2.39, x86_64, 16 cores. Times on another machine differ; the script
-``benchmarks/pfapack_comparison.py`` reproduces the measurement (see ``benchmarks/README.md``).
+``benchmarks/library_comparison.py`` reproduces the measurement (see ``benchmarks/README.md``).
 
 One thread
 ----------

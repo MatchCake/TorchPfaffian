@@ -32,9 +32,11 @@ often on a GPU, and is optimized by gradient descent.
 The reference implementation, [pfapack](https://github.com/basnijholt/pfapack), works on single NumPy
 arrays, without automatic differentiation or GPU support. The determinant `torch.linalg.det` gives only
 `Pf(A)^2 = det(A)` and loses the sign, which carries the physics (interference between amplitudes).
-TorchPfaffian fills this gap: a signed, batched and differentiable Pfaffian that is a drop-in PyTorch
-operation. It is the Pfaffian backend of the [MatchCake](https://github.com/MatchCake/MatchCake)
-matchgate simulator.
+[torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) brings a differentiable
+Parlett–Reid Pfaffian to PyTorch, with a Triton kernel on CUDA, for real matrices. TorchPfaffian fills the
+remaining gap: a signed, batched and differentiable Pfaffian that is a drop-in PyTorch operation, for real
+and complex matrices, with exact gradients at singular matrices. It is the Pfaffian backend of the
+[MatchCake](https://github.com/MatchCake/MatchCake) matchgate simulator.
 
 ## Features
 
@@ -55,6 +57,8 @@ matchgate simulator.
   On CPU it is faster than pfapack's C implementation on batches of small matrices, and on batches of large
   ones with several threads; on a single matrix, pfapack is faster. See the
   [performance](https://matchcake.github.io/TorchPfaffian/performance.html) page.
+  `benchmarks/library_comparison.py` times TorchPfaffian, pfapack, torchpfaff and lrux side by side, on CPU
+  and on GPU when available.
 
 ## Requirements
 
@@ -145,3 +149,31 @@ If you use TorchPfaffian in your research, please cite it:
 ```
 This DOI always resolves to the latest version. To cite the exact version you used, take its DOI and BibTeX
 entry from the [Zenodo record](https://doi.org/10.5281/zenodo.24085345).
+
+## Related software
+TorchPfaffian is compared against [pfapack](https://github.com/basnijholt/pfapack),
+[torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
+[lrux](https://github.com/ChenAo-Phys/lrux) in `benchmarks/library_comparison.py`. lrux, in JAX, computes
+determinant and Pfaffian ratios under low-rank updates, the inner loop of fermionic Monte Carlo
+([#33](https://github.com/MatchCake/TorchPfaffian/issues/33) tracks the same feature in TorchPfaffian).
+If you use torchpfaff or lrux, please cite them as well:
+```
+@software{adams_torchpfaff,
+  author  = {Corey Adams},
+  title   = {{torchpfaff}: A differentiable Pfaffian for {PyTorch}, with {GPU} support via {Triton}},
+  year    = {2026},
+  version = {0.2.0},
+  url     = {https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian},
+}
+
+@misc{chen_lrux,
+  author        = {Ao Chen and Christopher Roth},
+  title         = {{lrux}: Fast low-rank updates of determinants and {Pfaffians} in {JAX}},
+  year          = {2026},
+  eprint        = {2602.05255},
+  archivePrefix = {arXiv},
+  primaryClass  = {cond-mat.str-el},
+  doi           = {10.48550/arXiv.2602.05255},
+  url           = {https://arxiv.org/abs/2602.05255},
+}
+```

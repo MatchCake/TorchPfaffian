@@ -67,24 +67,45 @@ locally, because shared runners are noisy; so does a run that could not complete
 
 The tests of the tool itself run with `python -m pytest -o addopts="" benchmarks/tests`.
 
-## Comparison with pfapack
+## Comparison with pfapack, torchpfaff and lrux
 
-`pfapack_comparison.py` times TorchPfaffian against [pfapack](https://github.com/basnijholt/pfapack), the
-reference Pfaffian library, and checks that both agree. It uses random matrices from the `general` family
-of `cases.py`, in float64 and complex128. pfapack is not a dependency of the project, and it ships wheels
-only for some Python versions, so run it from a separate environment, outside the repository:
+`library_comparison.py` times TorchPfaffian against three other libraries and checks that they agree with
+pfapack:
+
+- [pfapack](https://github.com/basnijholt/pfapack), the reference Pfaffian library (NumPy, CPU, one matrix at
+  a time);
+- [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian), a differentiable PyTorch
+  Pfaffian with a Triton kernel on CUDA;
+- [lrux](https://github.com/ChenAo-Phys/lrux), a JAX library of low-rank Pfaffian updates, whose full Pfaffian
+  (from its dependency fermix) is timed jitted, in double precision.
+
+It uses random matrices from the `general` family of `cases.py`, in float64 and complex128. The PyTorch and JAX
+libraries run on CPU and, when CUDA is available, on the GPU too, so the table shows whether the GPU beats
+pfapack on CPU. None of these libraries is a dependency of the project: pfapack ships wheels only for some
+Python versions, and torchpfaff needs Python 3.12 or newer and is installed from GitHub. Run the script from
+a separate environment, outside the repository; a library that is not installed is not timed:
 
 ```bash
-uv venv --python 3.12 ~/.venvs/pfapack                       # pfapack has wheels up to Python 3.13
-uv pip install --python ~/.venvs/pfapack torch --index-url https://download.pytorch.org/whl/cpu
-uv pip install --python ~/.venvs/pfapack pfapack .            # builds this package, Rust kernel included
-~/.venvs/pfapack/bin/python benchmarks/pfapack_comparison.py --threads 1
-~/.venvs/pfapack/bin/python benchmarks/pfapack_comparison.py --threads 8 --sizes 32 128
+uv venv --python 3.12 ~/.venvs/pfaffian-libraries
+uv pip install --python ~/.venvs/pfaffian-libraries torch --index-url https://download.pytorch.org/whl/cpu  # CPU only
+# or, for the GPU runs: uv pip install --python ~/.venvs/pfaffian-libraries torch   (the CUDA build, with triton)
+uv pip install --python ~/.venvs/pfaffian-libraries pfapack . \
+    "torchpfaff @ git+https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian"
+uv pip install --python ~/.venvs/pfaffian-libraries lrux   # add "jax[cuda13]" to time lrux on the GPU
+~/.venvs/pfaffian-libraries/bin/python benchmarks/library_comparison.py --threads 1
+~/.venvs/pfaffian-libraries/bin/python benchmarks/library_comparison.py --threads 8 --sizes 32 128
 ```
 
-It prints a Markdown table with the time per matrix, the speed-up over pfapack's C implementation, and the
-largest relative difference from it. The raw records go to `benchmarks/results/pfapack-<timestamp>.json`.
-The documentation's performance page shows a run of it. Without pfapack, only TorchPfaffian is timed.
+It prints a terminal table, one block per input, with the time per matrix, the speed-up over pfapack's C
+implementation, the largest relative difference from it, and a star on the fastest method of each input.
+`--markdown` prints a Markdown table instead. Methods ending in `(CUDA)` run on the GPU, with the time of the
+transfer of the result back to the host included. A method that fails on an input is skipped with a note
+(torchpfaff does not support complex matrices). fermix's fast kernels need CUDA, so on CPU lrux runs
+fermix's generic `jax.numpy` fallback, and JAX's CPU threads are not pinned by `--threads`. JAX is told not
+to preallocate GPU memory, so torch and JAX share the GPU. The raw records go to
+`benchmarks/results/libraries-<timestamp>.json`, saved after every input; `--render <file>` prints the table
+of a saved run, including an interrupted one. The documentation's performance page shows a run of it.
+Without pfapack, nothing is compared, but the other libraries are still timed.
 
 ## Adding cases
 

@@ -7,6 +7,14 @@ changes the package's behaviour, API, documentation or packaging.
 
 ## [Unreleased]
 
+### Changed
+
+- `benchmarks/pfapack_comparison.py` is renamed `benchmarks/library_comparison.py`. It also times
+  [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
+  [lrux](https://github.com/ChenAo-Phys/lrux), runs them and TorchPfaffian on the GPU when CUDA is
+  available, prints a terminal table (`--markdown` for the old one), saves its results after every input
+  and re-renders a saved run with `--render`. The README mentions and cites torchpfaff and lrux.
+
 ## [0.0.6] - 2026-11-09
 
 ### Added
