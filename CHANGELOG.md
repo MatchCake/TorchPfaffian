@@ -43,6 +43,8 @@ changes the package's behaviour, API, documentation or packaging.
   step, up to `m = 1024` (and below 2^22 entries in `float64`, where the loop is as fast). On an RTX 3070,
   `float64` batches of 256 take 0.60 ms instead of 4.0 ms at `m = 32` and 2.9 ms instead of 8.0 ms at
   `m = 64`; `float32` is 2 to 35x faster. Complex inputs keep the PyTorch loop (#34).
+- `slog_pfaffian()` uses the same Triton kernel on CUDA, still without host synchronization: one `32 x 32`
+  matrix takes 0.33 ms instead of 3.95 ms, a batch of 256 0.64 ms instead of 4.0 ms (#34).
 - The backward of small CUDA inputs routed to the host (at most 2^13 entries,
   `RustPfaffianParlettReid.HOST_BACKWARD_MAX_NUMEL`) runs on the host too, about 30% faster for a single
   `m = 32` or `m = 64` matrix; a double backward stays on the device (#34).

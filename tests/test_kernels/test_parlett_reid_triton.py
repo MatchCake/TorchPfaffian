@@ -8,6 +8,7 @@ from tests.configs import (
     RTOL_SINGLE_PRECISION_COMPARISON,
     TEST_SEED,
 )
+from torch_pfaffian.kernels.parlett_reid_slog import parlett_reid_slog
 from torch_pfaffian.kernels.parlett_reid_triton import ParlettReidTriton
 from torch_pfaffian.strategies import PfaffianParlettReid
 
@@ -63,3 +64,20 @@ class TestParlettReidTriton:
         else:
             atol, rtol = ATOL_SCALAR_COMPARISON, RTOL_SCALAR_COMPARISON
         torch.testing.assert_close(result, expected, atol=atol, rtol=rtol)
+
+    @CUDA
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    def test_log_domain_pfaffian_matches_the_pytorch_loop(self, dtype, monkeypatch):  # pragma: no cover - needs a GPU
+        pytest.importorskip("triton")
+        matrix = self._skew(5, 40, 40, dtype=dtype).cuda()
+        matrix[1] = 0  # Pf = 0: phase 0, log -inf
+        phase, log_abs = parlett_reid_slog(matrix)
+        monkeypatch.setattr(ParlettReidTriton, "supports", staticmethod(lambda tensor: False))
+        expected_phase, expected_log = parlett_reid_slog(matrix)
+        if dtype == torch.float32:
+            atol, rtol = ATOL_SINGLE_PRECISION_COMPARISON, RTOL_SINGLE_PRECISION_COMPARISON
+        else:
+            atol, rtol = ATOL_SCALAR_COMPARISON, RTOL_SCALAR_COMPARISON
+        torch.testing.assert_close(phase, expected_phase)
+        torch.testing.assert_close(log_abs, expected_log, atol=atol, rtol=rtol)
+        assert phase[1] == 0 and log_abs[1] == -torch.inf
