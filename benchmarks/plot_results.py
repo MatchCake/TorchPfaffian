@@ -30,10 +30,10 @@ METRICS = (("seconds", "time per matrix"), ("peak_memory_bytes", "peak memory pe
 # distinct enough for a scatter plot (color is never the only cue).
 PACKAGE_MARKERS = {"torchpfaffian": "o", "pfapack (C)": "s", "lrux": "^", "torchpfaff": "D", "pfapack (Python)": "v"}
 ITEM_SIZES = {"float32": 4, "float64": 8, "complex64": 8, "complex128": 16}
-# Overview metrics: column, axis label, and what being best on an input is called in the legend.
+# Overview metrics: column and axis label.
 RELATIVE_METRICS = (
-    ("relative_seconds", "time relative to the fastest", "fastest"),
-    ("relative_memory", "peak memory relative to the leanest", "leanest"),
+    ("relative_seconds", "time relative to the fastest"),
+    ("relative_memory", "peak memory relative to the leanest"),
 )
 
 
@@ -49,14 +49,13 @@ class ResultsPlot:
     is the library, and the line style the device (solid on CPU, dashed on CUDA). A method without a memory
     record (lrux on CUDA, results saved before memory was recorded) has no memory line.
 
-    ``--overview`` adds one figure that compares the packages over every point of every file given. On each input
-    (one point of one panel), each package is taken at its best method and device (TorchPfaffian's compiled
-    variant and its ``new Pfaffian`` baseline count as TorchPfaffian), and its time and peak memory are divided by
-    those of the best package on that input, so 1x is the best and 3x three times slower (or heavier). The x-axis
-    is the input size in bytes (the batch of matrices, or of inverses for ``--ratios``), which is defined the same
-    way for every operation, dtype and batch size. The color and the marker shape are the package, filled when its
-    best method ran on CPU and hollow on CUDA, and each legend gives the share of inputs on which a package is the
-    best and the geometric mean of its ratio.
+    ``--overview`` adds one figure that compares the packages over every point of every file given, with one row
+    per device (CPU, then CUDA) and the time and the peak memory side by side. On each input (one point of one
+    panel) and device, each package is taken at its best method (TorchPfaffian's compiled variant and its
+    ``new Pfaffian`` baseline count as TorchPfaffian), and its time and peak memory are divided by those of the
+    best package there, so 1x is the best and 3x three times slower (or heavier). The x-axis is the input size in
+    bytes (the batch of matrices, or of inverses for ``--ratios``), which is defined the same way for every
+    operation, dtype and batch size. The color and the marker shape are the package.
     """
 
     @staticmethod
@@ -241,17 +240,18 @@ class ResultsPlot:
     @staticmethod
     def relative_to_best(measurements: Sequence[Measurement]):
         """
-        Each package's best time and memory on each input, relative to the best package on that input.
+        Each package's best time and memory on each input and device, relative to the best package there.
 
         An input is one point of a comparison panel (see :meth:`panels`): the operation, the dtype, the matrix size
         and the batch size (and the update for ``--ratios``, whose ``new Pfaffian`` baselines take part in every
-        panel of their update). A package is represented by its best method on the input (any device, eager or
-        compiled), and only inputs measured by at least two packages are kept.
+        panel of their update). Packages are compared on each device separately: a package is represented by its
+        best method on the input and device (eager or compiled), and only inputs that at least two packages measured
+        on that device are kept.
 
         :param measurements: Measurements of any number of runs.
-        :return: One row per input and package, with ``input_bytes``, ``package``, the ``device`` of its fastest
-            method, ``call_seconds`` and ``peak_memory_bytes``, and ``relative_seconds`` and ``relative_memory`` (1
-            for the best package on the input; the memory is ``nan`` where fewer than two packages recorded one).
+        :return: One row per input, device and package, with ``input_bytes``, ``call_seconds``,
+            ``peak_memory_bytes``, and ``relative_seconds`` and ``relative_memory`` (1 for the best package on the
+            input and device; the memory is ``nan`` where fewer than two packages recorded one).
         :rtype: pandas.DataFrame
         """
         import pandas as pd
@@ -268,7 +268,7 @@ class ResultsPlot:
         for update, operation in panels.itertuples(index=False):  # each baseline joins every panel of its update
             expanded.append(frame[ratios & baseline & (frame["update"] == update)].assign(operation=operation))
         frame = pd.concat(expanded, ignore_index=True)
-        keys = ["update", "operation", "dtype", "dimension", "batch"]
+        keys = ["device", "update", "operation", "dtype", "dimension", "batch"]
         fastest = frame.loc[frame.groupby(keys + ["package"])["call_seconds"].idxmin()]
         leanest = frame.groupby(keys + ["package"])["peak_memory_bytes"].min().rename("peak_memory_bytes")
         best = fastest.drop(columns="peak_memory_bytes").join(leanest, on=keys + ["package"])
@@ -283,7 +283,8 @@ class ResultsPlot:
     @staticmethod
     def overview(measurements: Sequence[Measurement], header: str):
         """
-        One figure comparing the packages on every input: time and peak memory relative to the best package.
+        One figure comparing the packages on every input: time and peak memory relative to the best package, one
+        row per device.
 
         :param measurements: Measurements of any number of runs, full-Pfaffian and ``--ratios`` alike.
         :param header: Description of the libraries and the machine, printed under the figure.
@@ -292,7 +293,6 @@ class ResultsPlot:
         """
         import matplotlib.pyplot as plt
         import matplotlib.ticker as ticker
-        import numpy as np
         import seaborn as sns
         from matplotlib.lines import Line2D
 
@@ -300,84 +300,67 @@ class ResultsPlot:
         frame = ResultsPlot.relative_to_best(measurements)
         packages = [name for name in PACKAGE_MARKERS if name in set(frame["package"])]
         packages += sorted(set(frame["package"]) - set(packages))
-        figure, axes = plt.subplots(1, 2, figsize=(14, 5.6))
-        for axis, (metric, label, best_label) in zip(axes, RELATIVE_METRICS):
-            data = frame.dropna(subset=[metric])
-            handles = []
-            for package in packages:
-                points = data[data["package"] == package]
-                if points.empty:
-                    continue
-                color = LIBRARY_COLORS.get(package, "#898781")
-                for device, on_device in points.groupby("device"):
+        devices = [device for device in DEVICE_MARKERS if device in set(frame["device"])] or ["CPU"]
+        row_height = 4.6
+        figure, axes = plt.subplots(len(devices), 2, figsize=(14, row_height * len(devices)), squeeze=False)
+        for row, device in enumerate(devices):
+            for column, (metric, label) in enumerate(RELATIVE_METRICS):
+                axis = axes[row][column]
+                data = frame[frame["device"] == device].dropna(subset=[metric])
+                for package in packages:
+                    points = data[data["package"] == package]
                     axis.scatter(
-                        on_device["input_bytes"],
-                        on_device[metric],
+                        points["input_bytes"],
+                        points[metric],
                         s=36,
                         marker=PACKAGE_MARKERS.get(package, "o"),
-                        facecolors=color if device == "CPU" else "white",
-                        edgecolors=color if device == "CUDA" else "white",
-                        linewidths=1.4 if device == "CUDA" else 0.6,
+                        color=LIBRARY_COLORS.get(package, "#898781"),
+                        edgecolors="white",
+                        linewidths=0.6,
                         alpha=0.85,
                         zorder=3,
                     )
-                best_share = (points[metric] <= 1.0 + 1e-12).mean()
-                mean = float(np.exp(np.log(points[metric]).mean()))
-                handles.append(
-                    Line2D(
-                        [],
-                        [],
-                        linestyle="",
-                        marker=PACKAGE_MARKERS.get(package, "o"),
-                        markersize=7,
-                        markerfacecolor=color,
-                        markeredgecolor="white",
-                        label=f"{package}: {best_label} on {best_share:.0%} of {len(points)}, {mean:.1f}x on average",
-                    )
-                )
-            axis.axhline(1.0, color="#52514e", linewidth=1.2, zorder=2)
-            axis.set_xscale("log")
-            axis.set_yscale("log")
-            axis.set_ylim(bottom=0.8)
-            axis.xaxis.set_major_formatter(ticker.FuncFormatter(ResultsPlot.format_bytes))
-            axis.yaxis.set_major_formatter(ticker.FuncFormatter(lambda value, _: f"{value:g}x"))
-            axis.set_xlabel("input size (matrices of the batch)")
-            axis.set_ylabel(label)
-            axis.set_title(label.capitalize() + " (1x = best package on the input)", fontsize="medium")
-            axis.tick_params(labelsize="small")
-            axis.legend(handles=handles, loc="upper left", fontsize="small", frameon=True, framealpha=0.9)
-        devices = [
+                if data.empty:
+                    axis.text(0.5, 0.5, "no comparison", transform=axis.transAxes, ha="center", color="#898781")
+                axis.axhline(1.0, color="#52514e", linewidth=1.2, zorder=2)
+                axis.set_xscale("log")
+                axis.set_yscale("log")
+                axis.set_ylim(bottom=0.8)
+                axis.xaxis.set_major_formatter(ticker.FuncFormatter(ResultsPlot.format_bytes))
+                axis.yaxis.set_major_formatter(ticker.FuncFormatter(lambda value, _: f"{value:g}x"))
+                axis.set_xlabel("input size (matrices of the batch)")
+                axis.set_ylabel(label)
+                axis.set_title(f"{device}: {label} (1x = best package on the input)", fontsize="medium")
+                axis.tick_params(labelsize="small")
+        handles = [
             Line2D(
                 [],
                 [],
                 linestyle="",
-                marker="o",
+                marker=PACKAGE_MARKERS.get(name, "o"),
                 markersize=7,
-                markerfacecolor="#52514e",
+                markerfacecolor=LIBRARY_COLORS.get(name, "#898781"),
                 markeredgecolor="white",
-                label="CPU (filled)",
-            ),
-            Line2D(
-                [],
-                [],
-                linestyle="",
-                marker="o",
-                markersize=7,
-                markerfacecolor="white",
-                markeredgecolor="#52514e",
-                markeredgewidth=1.4,
-                label="CUDA (hollow)",
-            ),
+                label=name,
+            )
+            for name in packages
         ]
-        figure.legend(handles=devices, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=2, frameon=False)
+        height = row_height * len(devices)
+        figure.legend(
+            handles=handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1 - 0.5 / height),
+            ncol=max(1, len(handles)),
+            frameon=False,
+        )
         figure.suptitle(
-            "Overview: each package at its best method and device, against the best package on each input",
+            "Overview: each package at its best method, against the best package on each input and device",
             y=1.0,
             fontsize="large",
             fontweight="bold",
         )
         figure.text(0.0, -0.01, "\n".join(textwrap.wrap(header, 180)), fontsize="x-small", color="#52514e", va="top")
-        figure.tight_layout(rect=(0, 0, 1, 0.92))
+        figure.tight_layout(rect=(0, 0, 1, 1 - 0.9 / height))
         return figure
 
     @staticmethod

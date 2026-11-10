@@ -100,7 +100,9 @@ class TestResultsPlot:
         assert ResultsPlot.package("pfapack (C)") == "pfapack (C)"
 
     def test_overview_puts_every_run_in_one_figure(self, tmp_path, capsys):
-        full = self._measurements(["pfapack (C)", "torchpfaffian (CUDA)", "unknown"], dtypes=("float64", "complex128"))
+        full = self._measurements(
+            ["pfapack (C)", "torchpfaffian (CUDA)", "lrux (CUDA)", "unknown"], dtypes=("float64", "complex128")
+        )
         ratios = self._measurements(["torchpfaffian ratio, compiled", "lrux ratio (CUDA)"], update="row")
         ratios[0].peak_memory_bytes = float("nan")
         paths = [tmp_path / "libraries.json", tmp_path / "ratios.json"]
@@ -110,12 +112,22 @@ class TestResultsPlot:
         assert capsys.readouterr().out.split()[-1] == str(tmp_path / "overview.png")
         assert (tmp_path / "overview.png").stat().st_size > 0
         figure = ResultsPlot.overview(full + ratios, "header")
-        time_axis, memory_axis = figure.axes
+        assert [axis.get_title().split(":")[0] for axis in figure.axes] == ["CPU", "CPU", "CUDA", "CUDA"]
         points = len(ResultsPlot.relative_to_best(full + ratios))
-        assert sum(len(collection.get_offsets()) for collection in time_axis.collections) == points
-        labels = [text.get_text() for text in time_axis.get_legend().get_texts()]
-        assert labels[0].startswith("torchpfaffian: fastest on 100% of") and "1.0x on average" in labels[0]
-        assert memory_axis.get_legend().get_texts()[0].get_text().startswith("torchpfaffian: leanest on")
+        time_axes = figure.axes[0::2]
+        assert sum(len(collection.get_offsets()) for axis in time_axes for collection in axis.collections) == points
+        assert [text.get_text() for text in figure.legends[0].get_texts()] == [
+            "torchpfaffian",
+            "pfapack (C)",
+            "lrux",
+            "unknown",
+        ]
+        # A device that no two packages share has no comparison.
+        cpu_only = ResultsPlot.overview([item for item in full if "CUDA" not in item.method], "header")
+        assert [axis.get_title().split(":")[0] for axis in cpu_only.axes] == ["CPU", "CPU"]
+        assert ResultsPlot.relative_to_best(self._measurements(["unknown"])).empty
+        empty = ResultsPlot.overview(self._measurements(["unknown"]), "header")
+        assert [text.get_text() for text in empty.axes[0].texts] == ["no comparison"]
 
     def test_relative_to_best_compares_each_package_at_its_best(self):
         def measured(method: str, seconds: float, memory: float, update: str = "") -> Measurement:
@@ -124,8 +136,9 @@ class TestResultsPlot:
         measurements = [
             measured("pfapack (C)", 2e-3, 1e3),
             measured("torchpfaffian", 1e-3, 4e3),
-            measured("torchpfaffian (CUDA)", 5e-4, float("nan")),
+            measured("torchpfaffian (CUDA)", 5e-4, 8e3),
             measured("lrux", 4e-3, 2e3),
+            measured("lrux (CUDA)", 1e-4, float("nan")),
             measured("unknown + gradient", 1e-3, 1e3),  # the only package on its input: dropped
             measured("pfapack (C)", 3e-3, 1e3, "row"),
             measured("torchpfaffian, new Pfaffian", 2e-3, 1e3, "row"),
@@ -133,21 +146,28 @@ class TestResultsPlot:
             measured("torchpfaffian ratio + inverse", 6e-3, 2e3, "row"),
             measured("lrux ratio", 5e-4, 4e3, "row"),
         ]
-        frame = ResultsPlot.relative_to_best(measurements).set_index(["update", "operation", "package"])
+        frame = ResultsPlot.relative_to_best(measurements).set_index(["device", "update", "operation", "package"])
         assert set(frame.index) == {
-            ("", "Pfaffian", "pfapack (C)"),
-            ("", "Pfaffian", "torchpfaffian"),
-            ("", "Pfaffian", "lrux"),
-            ("row", "ratio", "pfapack (C)"),
-            ("row", "ratio", "torchpfaffian"),
-            ("row", "ratio", "lrux"),
-            ("row", "ratio + inverse", "pfapack (C)"),
-            ("row", "ratio + inverse", "torchpfaffian"),
+            ("CPU", "", "Pfaffian", "pfapack (C)"),
+            ("CPU", "", "Pfaffian", "torchpfaffian"),
+            ("CPU", "", "Pfaffian", "lrux"),
+            ("CUDA", "", "Pfaffian", "torchpfaffian"),
+            ("CUDA", "", "Pfaffian", "lrux"),
+            ("CPU", "row", "ratio", "pfapack (C)"),
+            ("CPU", "row", "ratio", "torchpfaffian"),
+            ("CPU", "row", "ratio", "lrux"),
+            ("CPU", "row", "ratio + inverse", "pfapack (C)"),
+            ("CPU", "row", "ratio + inverse", "torchpfaffian"),
         }
-        torchpfaffian = frame.loc[("", "Pfaffian", "torchpfaffian")]
-        assert torchpfaffian["device"] == "CUDA" and torchpfaffian["relative_seconds"] == 1.0
-        assert frame.loc[("", "Pfaffian", "lrux"), "relative_seconds"] == 8.0
-        assert torchpfaffian["relative_memory"] == 4.0  # its leanest method, the CPU one
-        assert frame.loc[("row", "ratio", "torchpfaffian"), "relative_seconds"] == 2.0
+        assert frame.loc[("CPU", "", "Pfaffian", "torchpfaffian"), "relative_seconds"] == 1.0
+        assert frame.loc[("CPU", "", "Pfaffian", "lrux"), "relative_seconds"] == 4.0
+        assert frame.loc[("CPU", "", "Pfaffian", "torchpfaffian"), "relative_memory"] == 4.0
+        assert frame.loc[("CUDA", "", "Pfaffian", "torchpfaffian"), "relative_seconds"] == 5.0
+        # lrux recorded no CUDA memory: one package is not a comparison.
+        assert (
+            frame.loc[("CUDA", "", "Pfaffian", "torchpfaffian"), "relative_memory"]
+            != frame.loc[("CUDA", "", "Pfaffian", "torchpfaffian"), "relative_memory"]
+        )
+        assert frame.loc[("CPU", "row", "ratio", "torchpfaffian"), "relative_seconds"] == 2.0
         # Without an inverse from lrux, the new Pfaffian (2 ms) is TorchPfaffian's best on "ratio + inverse".
-        assert frame.loc[("row", "ratio + inverse", "torchpfaffian"), "relative_seconds"] == 1.0
+        assert frame.loc[("CPU", "row", "ratio + inverse", "torchpfaffian"), "relative_seconds"] == 1.0
