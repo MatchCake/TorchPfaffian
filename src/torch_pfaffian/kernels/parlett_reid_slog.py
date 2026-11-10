@@ -1,5 +1,7 @@
 import torch
 
+from .parlett_reid_triton import ParlettReidTriton
+
 
 def _real_dtype_of(dtype: torch.dtype) -> torch.dtype:
     """
@@ -55,6 +57,11 @@ def parlett_reid_slog(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]
             torch.zeros(batch_shape, dtype=real_dtype, device=device),
         )
 
+    if ParlettReidTriton.supports(matrix):  # pragma: no cover - needs a GPU
+        # One Triton launch for the whole elimination; its pivot, the largest |a[p, column]| below the diagonal,
+        # is the loop's largest |a[column, p]| of a skew-symmetric matrix. Like the loop, it never synchronizes.
+        working, swaps = ParlettReidTriton.eliminate(matrix)
+        return _slog_from_eliminated(working, swaps, batch_shape, dimension)
     working = matrix.reshape(-1, dimension, dimension).clone()  # (batch, m, m), eliminated in place
     batch = working.shape[0]
     rows = torch.arange(batch, device=device)[:, None].expand(batch, 2)  # (batch, 2)
@@ -76,16 +83,32 @@ def parlett_reid_slog(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]
         trailing.addcmul_(second_row_tail[:, :, None], tau[:, None, :])
         trailing.addcmul_(tau[:, :, None], second_row_tail[:, None, :], value=-1)
 
-    super_index = torch.arange(0, dimension, 2, device=device)
+    if offsets:
+        swaps = (torch.stack(offsets, dim=1) != 0).sum(dim=1)  # (batch,), each swap flips the sign
+    else:
+        swaps = torch.zeros(batch, dtype=torch.long, device=device)
+    return _slog_from_eliminated(working, swaps, batch_shape, dimension)
+
+
+def _slog_from_eliminated(
+    working: torch.Tensor, swaps: torch.Tensor, batch_shape: torch.Size, dimension: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    ``(phase, log|Pf|)`` from an eliminated batch and its number of row swaps.
+
+    :param working: Eliminated matrices of shape ``(batch, m, m)``, the factors of the Pfaffian at ``(2i, 2i + 1)``.
+    :param swaps: Number of row swaps of each matrix, of shape ``(batch,)``.
+    :param batch_shape: Batch shape of the result.
+    :param dimension: Matrix dimension ``m``.
+    :return: ``(phase, log_abs)``, as :func:`parlett_reid_slog` returns them.
+    :rtype: tuple[torch.Tensor, torch.Tensor]
+    """
+    super_index = torch.arange(0, dimension, 2, device=working.device)
     pivots = working[:, super_index, super_index + 1]  # (batch, m / 2), the last one included
     magnitudes = pivots.abs()
     alive = (magnitudes != 0).all(dim=1)
     log_abs = magnitudes.log().sum(dim=1)
-    phase = (pivots / magnitudes).prod(dim=1)  # unit-modulus factors (+-1 for real inputs)
-    if offsets:
-        swaps = (torch.stack(offsets, dim=1) != 0).sum(dim=1)  # (batch,), each swap flips the sign
-        phase = (1 - 2 * (swaps % 2)) * phase
-
+    phase = (1 - 2 * (swaps % 2)) * (pivots / magnitudes).prod(dim=1)  # unit-modulus factors (+-1 when real)
     phase = torch.where(alive, phase, torch.zeros_like(phase))
     log_abs = torch.where(alive, log_abs, torch.full_like(log_abs, -torch.inf))
     return phase.reshape(batch_shape), log_abs.reshape(batch_shape)
