@@ -47,6 +47,11 @@ class TestPfaffianUpdater:
         updated = matrix - update @ identity @ update.mT
         return updated if mask is None else torch.where(mask[..., None, None], updated, matrix)
 
+    @pytest.fixture(autouse=True)
+    def _delayed_updates_only(self, monkeypatch):
+        # These tests are about the delayed updates; small CPU inverses otherwise take native immediate updates.
+        monkeypatch.setattr(PfaffianUpdater, "IMMEDIATE_MAX_NUMEL", -1)
+
     @pytest.mark.parametrize("max_delay", [1, 3, 100])
     @pytest.mark.parametrize("rank", [1, 2])
     @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
@@ -257,3 +262,43 @@ class TestPfaffianUpdater:
         ratio = updater.ratio_replace(4, change)
         expected = updater.ratio_replace(torch.full((BATCH,), 4), change)
         torch.testing.assert_close(ratio, expected, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
+
+    def test_small_cpu_inverses_take_native_immediate_updates(self, monkeypatch):
+        pytest.importorskip("torch_pfaffian._rust")
+        matrix = self._skew()
+        delayed = PfaffianUpdater(matrix, max_delay=3)
+        monkeypatch.setattr(PfaffianUpdater, "IMMEDIATE_MAX_NUMEL", 2**18)
+        immediate = PfaffianUpdater(matrix, max_delay=3)
+        for step, update in enumerate(self._updates(4)):
+            mask = torch.tensor([True, step % 2 == 0, True])
+            for updater in (immediate, delayed):
+                updater.ratio(update)
+            torch.testing.assert_close(
+                immediate.ratio(update), delayed.ratio(update), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+            )
+            torch.testing.assert_close(
+                immediate.accept(update, mask),
+                delayed.accept(update, mask),
+                atol=ATOL_SCALAR_COMPARISON,
+                rtol=RTOL_SCALAR_COMPARISON,
+            )
+            index, change = torch.tensor([1, 4, 7]), 0.3 * update[..., 0]
+            torch.testing.assert_close(
+                immediate.ratio_replace(index, change),
+                delayed.ratio_replace(index, change),
+                atol=ATOL_SCALAR_COMPARISON,
+                rtol=RTOL_SCALAR_COMPARISON,
+            )
+            torch.testing.assert_close(
+                immediate.accept_replace(index, change, mask),
+                delayed.accept_replace(index, change, mask),
+                atol=ATOL_SCALAR_COMPARISON,
+                rtol=RTOL_SCALAR_COMPARISON,
+            )
+            assert immediate.delay == 0
+        torch.testing.assert_close(
+            immediate.inverse, delayed.inverse, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+        torch.testing.assert_close(
+            immediate.pfaffian, delayed.pfaffian, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )

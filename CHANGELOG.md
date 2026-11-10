@@ -35,6 +35,10 @@ changes the package's behaviour, API, documentation or packaging.
   Rust call on CPU without a graph to build: on one thread and one `n = 32` matrix, a rank-2 ratio and
   inverse take 18 us instead of 77 us and a row replacement with its inverse 23 us instead of 119 us,
   within 2x of lrux for every single-matrix case. Wide updates of large batches keep the PyTorch path.
+- `PfaffianUpdater` applies accepted moves at once with those kernels when nothing is delayed and the
+  inverse has at most 2^18 entries (CPU, no graph), which beats delaying there: 16 row moves of one `n = 32`
+  matrix take 25 us per move instead of 157 us (lrux's delayed updates: 85 us), `n = 512` 230 us instead of
+  363 us. Large batches keep the delayed updates.
 - Signed `pfaffian()` on CUDA is up to 67x faster (#34). Inputs with `batch * m^2 <= 2^20`
   (`AUTO_HOST_MAX_BATCH_SQUARE`) are computed by the Rust kernel on the host, with the backward on the device,
   since the elimination on the device is bound by its kernel launches there: `m = 32` takes 0.18 ms instead of
