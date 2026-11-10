@@ -122,6 +122,25 @@ class TestPfaffianUpdater:
             updater.pfaffian, pfaffian(matrix), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
         )
 
+    def test_row_replacement_without_mask_and_with_a_shared_change(self):
+        matrix = self._skew()
+        updater = PfaffianUpdater(matrix, max_delay=2)
+        index = torch.tensor([1, 5, 9])
+        change = 0.3 * self._updates(1)[0][0, :, 0]  # one change of shape (n,), broadcast over the 3 rows
+        ratio = updater.accept_replace(index, change)
+        rows = torch.arange(BATCH)
+        expanded = change.expand(BATCH, DIMENSION).clone()
+        expanded[rows, index] = 0
+        updated = matrix.clone()
+        updated[rows, index, :] += expanded
+        updated[rows, :, index] -= expanded
+        torch.testing.assert_close(
+            ratio, pfaffian(updated) / pfaffian(matrix), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+        torch.testing.assert_close(
+            updater.inverse, torch.linalg.inv(updated), atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
     def test_merge_and_reset(self):
         matrix = self._skew()
         updater = PfaffianUpdater(matrix, max_delay=10)
@@ -215,6 +234,8 @@ class TestPfaffianUpdater:
             updater.accept(torch.zeros(BATCH, DIMENSION, 2))
         with pytest.raises(ValueError, match="change"):
             updater.ratio_replace(0, torch.zeros(BATCH, DIMENSION + 1, dtype=torch.float64))
+        with pytest.raises(TypeError, match="dtype"):
+            updater.accept_replace(0, torch.zeros(BATCH, DIMENSION))
         with pytest.raises(TypeError, match="integer"):
             updater.ratio_replace(torch.tensor(0.5), torch.zeros(BATCH, DIMENSION, dtype=torch.float64))
 

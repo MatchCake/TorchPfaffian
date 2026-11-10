@@ -1,8 +1,15 @@
 import functools
+import importlib
+import types
+from collections.abc import Callable
+from typing import TypeVar
 
 import torch
 
+from ..kernels.small_n import SMALL_N_MAX, small_pfaffian
 from .skew_gradient import SkewGradient
+
+T = TypeVar("T")
 
 
 class LowRankPfaffian:
@@ -77,191 +84,6 @@ class LowRankPfaffian:
         return -1 if (rank * (rank - 1) // 2) % 2 else 1
 
     @staticmethod
-    def ratio(inverse: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
-        """
-        Ratio ``Pf(A - u J u^T) / Pf(A)`` from the inverse ``A^{-1}``.
-
-        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
-        :param update: Update vectors ``u``, of shape ``(..., n, 2k)``; the batch dimensions broadcast with those
-            of ``inverse``.
-        :return: The ratio, of shape ``(...)``.
-        :rtype: torch.Tensor
-        :raises ValueError: If the shapes do not match or ``update`` has an odd or zero number of columns.
-        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
-        """
-        inverse, update, dtype = LowRankPfaffian._prepare_update("LowRankPfaffian.ratio", inverse, update)
-        ratio, _ = LowRankPfaffian._ratio_and_r_matrix(update, LowRankPfaffian.project(inverse, update))
-        return ratio.to(dtype)
-
-    @staticmethod
-    def ratio_and_inverse(inverse: torch.Tensor, update: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Ratio ``Pf(A - u J u^T) / Pf(A)`` of :meth:`ratio` and the inverse ``(A - u J u^T)^{-1}``.
-
-        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
-        :param update: Update vectors ``u``, of shape ``(..., n, 2k)``; the batch dimensions broadcast with those
-            of ``inverse``.
-        :return: The ratio, of shape ``(...)``, and the updated inverse, of shape ``(..., n, n)``.
-        :rtype: tuple[torch.Tensor, torch.Tensor]
-        :raises ValueError: If the shapes do not match or ``update`` has an odd or zero number of columns.
-        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
-        """
-        inverse, update, dtype = LowRankPfaffian._prepare_update("LowRankPfaffian.ratio_and_inverse", inverse, update)
-        projected = LowRankPfaffian.project(inverse, update)  # (..., n, 2k)
-        ratio, r_matrix = LowRankPfaffian._ratio_and_r_matrix(update, projected)
-        solved = torch.linalg.solve_ex(r_matrix, projected.mT)[0]  # (..., 2k, n), R^{-1} (A^{-1} u)^T
-        return ratio.to(dtype), LowRankPfaffian.add_product(inverse, projected, solved).to(dtype)
-
-    @staticmethod
-    def ratio_replace(inverse: torch.Tensor, index: torch.Tensor | int, change: torch.Tensor) -> torch.Tensor:
-        r"""
-        Ratio of Pfaffians when one row and the matching column of a skew-symmetric matrix change.
-
-        Row ``i`` of ``A`` becomes ``A[i] + c`` and column ``i`` becomes ``A[:, i] - c``, so that ``A'`` stays
-        skew-symmetric; ``c_i`` is ignored (the diagonal stays zero). This is the rank-2 update ``u = (c, e_i)``
-        of :meth:`ratio`, with a one-hot ``e_i``, for which
-
-        .. math::
-            r = \frac{\mathrm{Pf}(A')}{\mathrm{Pf}(A)} = 1 + c^T A^{-1} e_i.
-
-        It reads one column of the inverse and costs ``O(n)``. To replace row ``i`` by a new row ``x`` (with
-        ``x_i = 0``), pass ``change = x - A[i]``. :meth:`ratio_replace_and_inverse` also updates the inverse.
-
-        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
-        :param index: Index ``i`` of the row and column that change, an integer or an integer tensor of shape
-            ``(...)``.
-        :param change: Change ``c`` of row ``i``, of shape ``(..., n)``.
-        :return: The ratio, whose shape is the broadcast of the batch shapes of ``inverse``, ``index`` and
-            ``change``.
-        :rtype: torch.Tensor
-        :raises ValueError: If the shapes do not match.
-        :raises TypeError: If the dtypes or devices of the inputs differ, ``index`` is not an integer tensor, or
-            the dtype is not supported.
-        """
-        prepared = LowRankPfaffian._prepare_replace("LowRankPfaffian.ratio_replace", inverse, index, change)
-        _, change, column, dtype = prepared
-        return (1 + (change * column).sum(dim=-1)).to(dtype)
-
-    @staticmethod
-    def ratio_replace_and_inverse(
-        inverse: torch.Tensor, index: torch.Tensor | int, change: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        r"""
-        Ratio of :meth:`ratio_replace` and the inverse of the updated matrix, in ``O(n^2)``:
-
-        .. math::
-            A'^{-1} = A^{-1} + \frac{(A^{-1} e_i)(A^{-1} c)^T - (A^{-1} c)(A^{-1} e_i)^T}{r}.
-
-        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
-        :param index: Index ``i`` of the row and column that change, an integer or an integer tensor of shape
-            ``(...)``.
-        :param change: Change ``c`` of row ``i``, of shape ``(..., n)``.
-        :return: The ratio, of the broadcast batch shape ``(...)``, and the updated inverse, of shape
-            ``(..., n, n)``.
-        :rtype: tuple[torch.Tensor, torch.Tensor]
-        :raises ValueError: If the shapes do not match.
-        :raises TypeError: If the dtypes or devices of the inputs differ, ``index`` is not an integer tensor, or
-            the dtype is not supported.
-        """
-        prepared = LowRankPfaffian._prepare_replace("LowRankPfaffian.ratio_replace_and_inverse", inverse, index, change)
-        inverse, change, column, dtype = prepared
-        ratio = 1 + (change * column).sum(dim=-1)
-        projected_change = LowRankPfaffian.project(inverse, change[..., None])[..., 0]  # (..., n), A^{-1} c
-        scaled = (1 / ratio)[..., None]
-        left = torch.stack([column, projected_change], dim=-1)  # (..., n, 2)
-        right = torch.stack([projected_change * scaled, -column * scaled], dim=-2)  # (..., 2, n)
-        return ratio.to(dtype), LowRankPfaffian.add_product(inverse, left, right).to(dtype)
-
-    @staticmethod
-    def ratio_extend(inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor) -> torch.Tensor:
-        r"""
-        Ratio of Pfaffians when a skew-symmetric matrix grows by ``2k`` rows and columns.
-
-        For the bordered matrix
-
-        .. math::
-            M = \begin{pmatrix} A & B \\ -B^T & C \end{pmatrix}, \qquad
-            \frac{\mathrm{Pf}(M)}{\mathrm{Pf}(A)} = \mathrm{Pf}\left(C + B^T A^{-1} B\right),
-
-        the Pfaffian of the ``2k x 2k`` Schur complement, in ``O(m^2 k)`` from ``A^{-1}``. This is the step of
-        sequential (qubit-by-qubit) sampling of matchgate circuits, where a qubit adds the ``2 x 2`` block of its
-        two Majorana modes: the conditional probability of an outcome is ``|ratio| / 2``. ``A`` may be empty
-        (``m = 0``), when the ratio is ``Pf(C)``.
-
-        Only ``C`` depends on the outcome, so several candidate corners are evaluated at the cost of one: give
-        them a leading dimension, e.g. ``corner`` of shape ``(2, ..., 2k, 2k)`` for the outcomes 0 and 1, and the
-        ratios have shape ``(2, ...)`` (``A^{-1} B`` is computed once, at the batch shape of ``inverse`` and
-        ``border``). :class:`~torch_pfaffian.low_rank.PfaffianChain` keeps ``A^{-1}`` from one step to the next.
-
-        :param inverse: Inverse ``A^{-1}`` of the current skew-symmetric matrix, of shape ``(..., m, m)``.
-        :param border: Coupling ``B`` of the current rows to the new ones, of shape ``(..., m, 2k)``.
-        :param corner: Skew-symmetric block ``C`` of the new rows and columns, of shape ``(..., 2k, 2k)``.
-        :return: The ratio ``Pf(M) / Pf(A)``, of the broadcast batch shape ``(...)``.
-        :rtype: torch.Tensor
-        :raises ValueError: If the shapes do not match.
-        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
-        """
-        inverse, border, corner, dtype = LowRankPfaffian._prepare_extend(
-            "LowRankPfaffian.ratio_extend", inverse, border, corner
-        )
-        schur, _ = LowRankPfaffian._schur_complement(inverse, border, corner)
-        return LowRankPfaffian._small_pfaffian(schur).to(dtype)
-
-    @staticmethod
-    def ratio_extend_and_inverse(
-        inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        r"""
-        Ratio of :meth:`ratio_extend` and the inverse of the bordered matrix, in ``O(m^2 k)``.
-
-        With ``P = A^{-1} B`` and the Schur complement ``S = C + B^T A^{-1} B``,
-
-        .. math::
-            M^{-1} = \begin{pmatrix} A^{-1} + P S^{-1} P^T & -P S^{-1} \\ -S^{-1} P^T & S^{-1} \end{pmatrix}.
-
-        :param inverse: Inverse ``A^{-1}`` of the current skew-symmetric matrix, of shape ``(..., m, m)``.
-        :param border: Coupling ``B`` of the current rows to the new ones, of shape ``(..., m, 2k)``.
-        :param corner: Skew-symmetric block ``C`` of the new rows and columns, of shape ``(..., 2k, 2k)``.
-        :return: The ratio, of the broadcast batch shape ``(...)``, and ``M^{-1}``, of shape
-            ``(..., m + 2k, m + 2k)`` (huge or non-finite when the ratio is zero).
-        :rtype: tuple[torch.Tensor, torch.Tensor]
-        :raises ValueError: If the shapes do not match.
-        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
-        """
-        inverse, border, corner, dtype = LowRankPfaffian._prepare_extend(
-            "LowRankPfaffian.ratio_extend_and_inverse", inverse, border, corner
-        )
-        schur, projected = LowRankPfaffian._schur_complement(inverse, border, corner)
-        ratio = LowRankPfaffian._small_pfaffian(schur)
-        schur_inverse = LowRankPfaffian._small_inverse(schur, ratio)
-        batch_shape = torch.broadcast_shapes(inverse.shape[:-2], projected.shape[:-2], schur.shape[:-2])
-        size, width = inverse.shape[-1], schur.shape[-1]
-        top_right = -(projected @ schur_inverse)  # (..., m, 2k)
-        top_left = LowRankPfaffian.add_product(inverse, projected, top_right.mT)  # A^{-1} + P S^{-1} P^T
-        top = torch.cat(
-            [top_left.expand(*batch_shape, size, size), top_right.expand(*batch_shape, size, width)], dim=-1
-        )
-        bottom = torch.cat(
-            [-top_right.mT.expand(*batch_shape, width, size), schur_inverse.expand(*batch_shape, width, width)],
-            dim=-1,
-        )
-        return ratio.to(dtype), torch.cat([top, bottom], dim=-2).to(dtype)
-
-    @staticmethod
-    def ratio_and_r_inverse(update: torch.Tensor, projected: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Ratio of :meth:`ratio` and the inverse of its matrix ``R``, from the projection ``A^{-1} u``.
-
-        :param update: Update vectors ``u``, of shape ``(..., n, 2k)``.
-        :param projected: Projection ``A^{-1} u``, of shape ``(..., n, 2k)``.
-        :return: The ratio, of shape ``(...)``, and ``R^{-1}``, of shape ``(..., 2k, 2k)`` (huge or non-finite
-            when the ratio is zero).
-        :rtype: tuple[torch.Tensor, torch.Tensor]
-        """
-        ratio, r_matrix = LowRankPfaffian._ratio_and_r_matrix(update, projected)
-        return ratio, LowRankPfaffian._small_inverse(r_matrix, ratio)
-
-    @staticmethod
     def project(inverse: torch.Tensor, vectors: torch.Tensor) -> torch.Tensor:
         """
         Product ``A^{-1} v`` with a skew-symmetric ``A^{-1}``, computed as ``-(v^T A^{-1})^T``.
@@ -274,7 +96,7 @@ class LowRankPfaffian:
         :return: ``A^{-1} v``, of shape ``(..., n, p)``.
         :rtype: torch.Tensor
         """
-        return -(vectors.mT @ inverse).mT
+        return -LowRankPfaffian._matmul(vectors.mT, inverse).mT
 
     @staticmethod
     def add_product(matrix: torch.Tensor, left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
@@ -322,41 +144,144 @@ class LowRankPfaffian:
         return index.long()
 
     @staticmethod
+    def _ratio_core(inverse: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
+        rows = LowRankPfaffian._matmul(update.mT, inverse)  # (..., 2k, n), u^T A^{-1}
+        if update.shape[-1] == 2:
+            return (
+                1 + LowRankPfaffian._matmul(rows[..., :1, :], update[..., 1:])[..., 0, 0]
+            )  # R_01 = 1 + u_0^T A^{-1} u_1
+        return LowRankPfaffian._r_pfaffian(LowRankPfaffian._r_matrix(LowRankPfaffian._matmul(rows, update)))
+
+    @staticmethod
+    def _ratio_and_inverse_core(inverse: torch.Tensor, update: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # With the rows u^T A^{-1} = -(A^{-1} u)^T, the correction (A^{-1} u) R^{-1} (A^{-1} u)^T is
+        # rows^T R^{-1} rows.
+        rows = LowRankPfaffian._matmul(update.mT, inverse)  # (..., 2k, n)
+        inner = LowRankPfaffian._matmul(rows, update)  # (..., 2k, 2k), u^T A^{-1} u
+        if update.shape[-1] == 2:
+            ratio = 1 + inner[..., 0, 1]
+            # R^{-1} = [[0, -1/r], [1/r, 0]]: rows^T R^{-1} rows = (rows_1^T rows_0 - rows_0^T rows_1) / r.
+            right = torch.stack([rows[..., 0, :], -rows[..., 1, :]], dim=-2) / ratio[..., None, None]
+            return ratio, LowRankPfaffian.add_product(inverse, rows.mT.flip(-1), right)
+        r_matrix = LowRankPfaffian._r_matrix(LowRankPfaffian._skew(inner))
+        ratio = LowRankPfaffian._r_pfaffian(r_matrix)
+        solved = torch.linalg.solve_ex(r_matrix, rows)[0]  # (..., 2k, n), R^{-1} rows
+        return ratio, LowRankPfaffian.add_product(inverse, rows.mT, solved)
+
+    @staticmethod
+    def _ratio_replace_core(inverse: torch.Tensor, index: torch.Tensor, change: torch.Tensor) -> torch.Tensor:
+        column = LowRankPfaffian._column(inverse, index)  # (..., n), A^{-1} e_i
+        return 1 + (change * column).sum(dim=-1)
+
+    @staticmethod
+    def _ratio_replace_and_inverse_core(
+        inverse: torch.Tensor, index: torch.Tensor, change: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        column = LowRankPfaffian._column(inverse, index)  # (..., n), A^{-1} e_i
+        ratio = 1 + (change * column).sum(dim=-1)
+        row = LowRankPfaffian._matmul(change[..., None, :], inverse)  # (..., 1, n), c^T A^{-1} = -(A^{-1} c)^T
+        # (A^{-1} e_i)(A^{-1} c)^T - (A^{-1} c)(A^{-1} e_i)^T = [col, row^T] @ [-row; col^T]
+        left = torch.cat([column[..., :, None], row.mT], dim=-1)  # (..., n, 2)
+        right = torch.cat([-row, column[..., None, :]], dim=-2) / ratio[..., None, None]  # (..., 2, n)
+        return ratio, LowRankPfaffian.add_product(inverse, left, right)
+
+    @staticmethod
+    def _column(inverse: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+        # Column i of the skew-symmetric A^{-1} as minus its row i: the same values, and a row gather, which
+        # torch.compile's C++ backend fuses correctly (torch 2.10 generated invalid code for the column gather
+        # fused with the concatenation of _ratio_replace_and_inverse_core).
+        return -torch.take_along_dim(inverse, index[..., None, None], dim=-2)[..., 0, :]  # (..., n)
+
+    @staticmethod
+    def _ratio_extend_core(inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor) -> torch.Tensor:
+        schur = corner + LowRankPfaffian._matmul(
+            LowRankPfaffian._matmul(border.mT, inverse), border
+        )  # (..., 2k, 2k), C + B^T A^{-1} B
+        return LowRankPfaffian._small_pfaffian(schur)
+
+    @staticmethod
+    def _ratio_extend_and_inverse_core(
+        inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # With rows = B^T A^{-1} = -P^T and T = S^{-1} rows: A^{-1} + P S^{-1} P^T = A^{-1} + rows^T T,
+        # -P S^{-1} = -T^T and -S^{-1} P^T = T.
+        rows = LowRankPfaffian._matmul(border.mT, inverse)  # (..., 2k, m)
+        schur = LowRankPfaffian._skew(
+            corner + LowRankPfaffian._matmul(rows, border)
+        )  # (..., 2k, 2k), kept skew for its inverse
+        ratio = LowRankPfaffian._small_pfaffian(schur)
+        schur_inverse = LowRankPfaffian._small_inverse(schur, ratio)
+        solved = LowRankPfaffian._matmul(schur_inverse, rows)  # (..., 2k, m), T
+        batch_shape = torch.broadcast_shapes(inverse.shape[:-2], solved.shape[:-2])
+        size, width = inverse.shape[-1], schur.shape[-1]
+        top_left = LowRankPfaffian.add_product(inverse, rows.mT, solved)
+        top = torch.cat(
+            [top_left.expand(*batch_shape, size, size), -solved.mT.expand(*batch_shape, size, width)], dim=-1
+        )
+        bottom = torch.cat(
+            [solved.expand(*batch_shape, width, size), schur_inverse.expand(*batch_shape, width, width)], dim=-1
+        )
+        return ratio, torch.cat([top, bottom], dim=-2)
+
+    @staticmethod
+    def _ratio_and_r_inverse_core(update: torch.Tensor, projected: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # R is re-skew-symmetrized: its inverse enters the stored inverse, which must stay skew-symmetric (the
+        # delayed projections and project() rely on it), and near-singular steps amplify any asymmetry.
+        r_matrix = LowRankPfaffian._r_matrix(LowRankPfaffian._skew(LowRankPfaffian._matmul(update.mT, projected)))
+        ratio = LowRankPfaffian._r_pfaffian(r_matrix)
+        if r_matrix.shape[-1] == 2:
+            return ratio, -r_matrix / (ratio * ratio)[..., None, None]  # [[0, r], [-r, 0]]^{-1} = -R / r^2
+        return ratio, torch.linalg.inv_ex(r_matrix)[0]
+
+    @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def _package() -> types.ModuleType:
+        # The package's dtype helpers and pfaffian(); torch_pfaffian imports this module before defining them, so
+        # they are looked up on first use, once.
+        return importlib.import_module("torch_pfaffian")
+
+    @staticmethod
     @functools.lru_cache(maxsize=64)
     def _cached_skew_identity(rank: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
         # J is a constant: building it costs five small kernels, more than the rest of a rank-2 ratio on CPU.
-        return LowRankPfaffian.skew_identity(rank, dtype=dtype, device=device)
+        with torch.inference_mode(False):
+            return LowRankPfaffian.skew_identity(rank, dtype=dtype, device=device)
 
     @staticmethod
-    def _ratio_and_r_matrix(update: torch.Tensor, projected: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        rank = update.shape[-1] // 2
-        inner = update.mT @ projected  # (..., 2k, 2k), skew-symmetric up to round-off
-        identity = LowRankPfaffian._cached_skew_identity(rank, update.dtype, update.device)
-        r_matrix = identity + 0.5 * (inner - inner.mT)
+    def _matmul(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+        # torch.matmul's broadcasting logic (expand, reshape) costs about as much as the bmm kernel itself on the
+        # small operands of these updates; when the batch shapes already agree, call mm or bmm directly.
+        if left.dim() == right.dim() == 3 and left.shape[0] == right.shape[0]:
+            return torch.bmm(left, right)
+        if left.dim() == right.dim() == 2:
+            return torch.mm(left, right)
+        return left @ right
+
+    @staticmethod
+    def _skew(matrix: torch.Tensor) -> torch.Tensor:
+        return 0.5 * (matrix - matrix.mT)
+
+    @staticmethod
+    def _r_matrix(inner: torch.Tensor) -> torch.Tensor:
+        # R = J + u^T A^{-1} u. The ratio-only paths do not re-skew-symmetrize it, as the Pfaffian kernels only read
+        # its upper triangle; the paths that invert it do (see ratio_and_r_inverse).
+        rank = inner.shape[-1] // 2
+        return LowRankPfaffian._cached_skew_identity(rank, inner.dtype, inner.device) + inner
+
+    @staticmethod
+    def _r_pfaffian(r_matrix: torch.Tensor) -> torch.Tensor:
         ratio = LowRankPfaffian._small_pfaffian(r_matrix)
-        if LowRankPfaffian.skew_identity_pfaffian(rank) < 0:
-            ratio = -ratio
-        return ratio, r_matrix
-
-    @staticmethod
-    def _schur_complement(
-        inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        # S = C + B^T A^{-1} B and P = A^{-1} B; S is computed at the batch shape of A and B before adding C, so
-        # that candidate corners in leading dimensions share it.
-        projected = LowRankPfaffian.project(inverse, border)  # (..., m, 2k)
-        inner = border.mT @ projected  # (..., 2k, 2k)
-        schur = corner + inner
-        return 0.5 * (schur - schur.mT), projected
+        return -ratio if LowRankPfaffian.skew_identity_pfaffian(r_matrix.shape[-1] // 2) < 0 else ratio
 
     @staticmethod
     def _small_pfaffian(matrix: torch.Tensor) -> torch.Tensor:
-        from .. import pfaffian
-
+        # The unrolled kernel reads the upper triangle and needs no routing, finiteness check or host
+        # synchronization; larger blocks (k > 5, rare) go through pfaffian().
         if matrix.shape[-1] == 2:
             return matrix[..., 0, 1]
-        # check_finite would synchronize with the host; the matrix is small and its Pfaffian cannot overflow.
-        return pfaffian(matrix, check_finite=False)
+        if matrix.shape[-1] <= SMALL_N_MAX:
+            return small_pfaffian(matrix)
+        return LowRankPfaffian._package().pfaffian(matrix, check_finite=False)
 
     @staticmethod
     def _small_inverse(matrix: torch.Tensor, pfaffian_value: torch.Tensor) -> torch.Tensor:
@@ -364,6 +289,10 @@ class LowRankPfaffian:
             # [[0, r], [-r, 0]]^{-1} = -[[0, r], [-r, 0]] / r^2
             return -matrix / (pfaffian_value * pfaffian_value)[..., None, None]
         return torch.linalg.inv_ex(matrix)[0]
+
+    @staticmethod
+    def _restore(tensor: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+        return tensor if tensor.dtype == dtype else tensor.to(dtype)
 
     @staticmethod
     def _prepare_update(
@@ -377,13 +306,13 @@ class LowRankPfaffian:
         dtype = inverse.dtype
         compute_dtype = LowRankPfaffian._compute_dtype(function_name, dtype)
         inverse = SkewGradient.apply_if_needed(inverse)
-        return inverse.to(compute_dtype), update.to(compute_dtype), dtype
+        return LowRankPfaffian._restore(inverse, compute_dtype), LowRankPfaffian._restore(update, compute_dtype), dtype
 
     @staticmethod
     def _prepare_replace(
         function_name: str, inverse: torch.Tensor, index: torch.Tensor | int, change: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.dtype]:
-        # Validated, upcast and broadcast inputs, the change with c_i = 0, and the column A^{-1} e_i.
+        # Validated, upcast inputs, broadcast to a common batch shape.
         LowRankPfaffian._check_inputs(function_name, inverse, change)
         dimension = inverse.shape[-1]
         if change.shape[-1] != dimension:
@@ -391,18 +320,16 @@ class LowRankPfaffian:
         index = LowRankPfaffian.as_index(index, inverse.device)
         dtype = inverse.dtype
         compute_dtype = LowRankPfaffian._compute_dtype(function_name, dtype)
-        inverse, change = SkewGradient.apply_if_needed(inverse).to(compute_dtype), change.to(compute_dtype)
+        inverse = LowRankPfaffian._restore(SkewGradient.apply_if_needed(inverse), compute_dtype)
+        change = LowRankPfaffian._restore(change, compute_dtype)
         batch_shape = torch.broadcast_shapes(inverse.shape[:-2], index.shape, change.shape[:-1])
         if change.shape[:-1] != batch_shape:
             change = change.expand(*batch_shape, dimension)
         if index.shape != batch_shape:
             index = index.expand(batch_shape)
-        index = index[..., None]  # (..., 1)
-        change = change.scatter(-1, index, 0)  # c_i does not change A (its diagonal stays zero)
         if inverse.shape[:-2] != batch_shape:
             inverse = inverse.expand(*batch_shape, dimension, dimension)
-        column = torch.take_along_dim(inverse, index[..., None, :], dim=-1)[..., 0]  # (..., n), A^{-1} e_i
-        return inverse, change, column, dtype
+        return inverse, index, change, dtype
 
     @staticmethod
     def _prepare_extend(
@@ -420,13 +347,12 @@ class LowRankPfaffian:
             raise ValueError(f"corner must have shape (..., {width}, {width}); got {tuple(corner.shape)}.")
         dtype = inverse.dtype
         compute_dtype = LowRankPfaffian._compute_dtype(function_name, dtype)
-        inverse = SkewGradient.apply_if_needed(inverse)
-        return inverse.to(compute_dtype), border.to(compute_dtype), corner.to(compute_dtype), dtype
+        inverse = LowRankPfaffian._restore(SkewGradient.apply_if_needed(inverse), compute_dtype)
+        border = LowRankPfaffian._restore(border, compute_dtype)
+        return inverse, border, LowRankPfaffian._restore(corner, compute_dtype), dtype
 
     @staticmethod
     def _check_inputs(function_name: str, inverse: torch.Tensor, other: torch.Tensor) -> None:
-        from .. import _check_dtype
-
         if inverse.dim() < 2 or inverse.shape[-1] != inverse.shape[-2]:
             raise ValueError(f"{function_name}: inverse must have shape (..., n, n); got {tuple(inverse.shape)}.")
         if other.dtype != inverse.dtype or other.device != inverse.device:
@@ -434,13 +360,179 @@ class LowRankPfaffian:
                 f"{function_name}: the inputs must share a dtype and a device; got {inverse.dtype} on "
                 f"{inverse.device} and {other.dtype} on {other.device}."
             )
-        _check_dtype(function_name, inverse.dtype)
+        LowRankPfaffian._package()._check_dtype(function_name, inverse.dtype)
 
     @staticmethod
     def _compute_dtype(function_name: str, dtype: torch.dtype) -> torch.dtype:
-        from .. import LOW_PRECISION_DTYPES, _upcast_dtype, _warn_upcast
-
-        if dtype not in LOW_PRECISION_DTYPES:
+        package = LowRankPfaffian._package()
+        if dtype not in package.LOW_PRECISION_DTYPES:
             return dtype
-        _warn_upcast(function_name, dtype, stacklevel=4)
-        return _upcast_dtype(dtype)
+        package._warn_upcast(function_name, dtype, stacklevel=4)
+        return package._upcast_dtype(dtype)
+
+    @classmethod
+    def ratio(cls, inverse: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
+        """
+        Ratio ``Pf(A - u J u^T) / Pf(A)`` from the inverse ``A^{-1}``.
+
+        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
+        :param update: Update vectors ``u``, of shape ``(..., n, 2k)``; the batch dimensions broadcast with those
+            of ``inverse``.
+        :return: The ratio, of shape ``(...)``.
+        :rtype: torch.Tensor
+        :raises ValueError: If the shapes do not match or ``update`` has an odd or zero number of columns.
+        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
+        """
+        inverse, update, dtype = cls._prepare_update("LowRankPfaffian.ratio", inverse, update)
+        return cls._restore(cls._call(LowRankPfaffian._ratio_core, inverse, update), dtype)
+
+    @classmethod
+    def ratio_and_inverse(cls, inverse: torch.Tensor, update: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Ratio ``Pf(A - u J u^T) / Pf(A)`` of :meth:`ratio` and the inverse ``(A - u J u^T)^{-1}``.
+
+        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
+        :param update: Update vectors ``u``, of shape ``(..., n, 2k)``; the batch dimensions broadcast with those
+            of ``inverse``.
+        :return: The ratio, of shape ``(...)``, and the updated inverse, of shape ``(..., n, n)``.
+        :rtype: tuple[torch.Tensor, torch.Tensor]
+        :raises ValueError: If the shapes do not match or ``update`` has an odd or zero number of columns.
+        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
+        """
+        inverse, update, dtype = cls._prepare_update("LowRankPfaffian.ratio_and_inverse", inverse, update)
+        ratio, new_inverse = cls._call(LowRankPfaffian._ratio_and_inverse_core, inverse, update)
+        return cls._restore(ratio, dtype), cls._restore(new_inverse, dtype)
+
+    @classmethod
+    def ratio_replace(cls, inverse: torch.Tensor, index: torch.Tensor | int, change: torch.Tensor) -> torch.Tensor:
+        r"""
+        Ratio of Pfaffians when one row and the matching column of a skew-symmetric matrix change.
+
+        Row ``i`` of ``A`` becomes ``A[i] + c`` and column ``i`` becomes ``A[:, i] - c``, so that ``A'`` stays
+        skew-symmetric; ``c_i`` has no effect (the diagonal stays zero, and it only meets the zero diagonal of
+        ``A^{-1}``, up to round-off). This is the rank-2 update ``u = (c, e_i)``
+        of :meth:`ratio`, with a one-hot ``e_i``, for which
+
+        .. math::
+            r = \frac{\mathrm{Pf}(A')}{\mathrm{Pf}(A)} = 1 + c^T A^{-1} e_i.
+
+        It reads one column of the inverse and costs ``O(n)``. To replace row ``i`` by a new row ``x`` (with
+        ``x_i = 0``), pass ``change = x - A[i]``. :meth:`ratio_replace_and_inverse` also updates the inverse.
+
+        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
+        :param index: Index ``i`` of the row and column that change, an integer or an integer tensor of shape
+            ``(...)``.
+        :param change: Change ``c`` of row ``i``, of shape ``(..., n)``.
+        :return: The ratio, whose shape is the broadcast of the batch shapes of ``inverse``, ``index`` and
+            ``change``.
+        :rtype: torch.Tensor
+        :raises ValueError: If the shapes do not match.
+        :raises TypeError: If the dtypes or devices of the inputs differ, ``index`` is not an integer tensor, or
+            the dtype is not supported.
+        """
+        inverse, index, change, dtype = cls._prepare_replace("LowRankPfaffian.ratio_replace", inverse, index, change)
+        return cls._restore(cls._call(LowRankPfaffian._ratio_replace_core, inverse, index, change), dtype)
+
+    @classmethod
+    def ratio_replace_and_inverse(
+        cls, inverse: torch.Tensor, index: torch.Tensor | int, change: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        r"""
+        Ratio of :meth:`ratio_replace` and the inverse of the updated matrix, in ``O(n^2)``:
+
+        .. math::
+            A'^{-1} = A^{-1} + \frac{(A^{-1} e_i)(A^{-1} c)^T - (A^{-1} c)(A^{-1} e_i)^T}{r}.
+
+        :param inverse: Inverse ``A^{-1}`` of the original skew-symmetric matrix, of shape ``(..., n, n)``.
+        :param index: Index ``i`` of the row and column that change, an integer or an integer tensor of shape
+            ``(...)``.
+        :param change: Change ``c`` of row ``i``, of shape ``(..., n)``.
+        :return: The ratio, of the broadcast batch shape ``(...)``, and the updated inverse, of shape
+            ``(..., n, n)``.
+        :rtype: tuple[torch.Tensor, torch.Tensor]
+        :raises ValueError: If the shapes do not match.
+        :raises TypeError: If the dtypes or devices of the inputs differ, ``index`` is not an integer tensor, or
+            the dtype is not supported.
+        """
+        inverse, index, change, dtype = cls._prepare_replace(
+            "LowRankPfaffian.ratio_replace_and_inverse", inverse, index, change
+        )
+        ratio, new_inverse = cls._call(LowRankPfaffian._ratio_replace_and_inverse_core, inverse, index, change)
+        return cls._restore(ratio, dtype), cls._restore(new_inverse, dtype)
+
+    @classmethod
+    def ratio_extend(cls, inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor) -> torch.Tensor:
+        r"""
+        Ratio of Pfaffians when a skew-symmetric matrix grows by ``2k`` rows and columns.
+
+        For the bordered matrix
+
+        .. math::
+            M = \begin{pmatrix} A & B \\ -B^T & C \end{pmatrix}, \qquad
+            \frac{\mathrm{Pf}(M)}{\mathrm{Pf}(A)} = \mathrm{Pf}\left(C + B^T A^{-1} B\right),
+
+        the Pfaffian of the ``2k x 2k`` Schur complement, in ``O(m^2 k)`` from ``A^{-1}``. This is the step of
+        sequential (qubit-by-qubit) sampling of matchgate circuits, where a qubit adds the ``2 x 2`` block of its
+        two Majorana modes: the conditional probability of an outcome is ``|ratio| / 2``. ``A`` may be empty
+        (``m = 0``), when the ratio is ``Pf(C)``.
+
+        Only ``C`` depends on the outcome, so several candidate corners are evaluated at the cost of one: give
+        them a leading dimension, e.g. ``corner`` of shape ``(2, ..., 2k, 2k)`` for the outcomes 0 and 1, and the
+        ratios have shape ``(2, ...)`` (``A^{-1} B`` is computed once, at the batch shape of ``inverse`` and
+        ``border``). :class:`~torch_pfaffian.low_rank.PfaffianChain` keeps ``A^{-1}`` from one step to the next.
+
+        :param inverse: Inverse ``A^{-1}`` of the current skew-symmetric matrix, of shape ``(..., m, m)``.
+        :param border: Coupling ``B`` of the current rows to the new ones, of shape ``(..., m, 2k)``.
+        :param corner: Skew-symmetric block ``C`` of the new rows and columns, of shape ``(..., 2k, 2k)``.
+        :return: The ratio ``Pf(M) / Pf(A)``, of the broadcast batch shape ``(...)``.
+        :rtype: torch.Tensor
+        :raises ValueError: If the shapes do not match.
+        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
+        """
+        inverse, border, corner, dtype = cls._prepare_extend("LowRankPfaffian.ratio_extend", inverse, border, corner)
+        return cls._restore(cls._call(LowRankPfaffian._ratio_extend_core, inverse, border, corner), dtype)
+
+    @classmethod
+    def ratio_extend_and_inverse(
+        cls, inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        r"""
+        Ratio of :meth:`ratio_extend` and the inverse of the bordered matrix, in ``O(m^2 k)``.
+
+        With ``P = A^{-1} B`` and the Schur complement ``S = C + B^T A^{-1} B``,
+
+        .. math::
+            M^{-1} = \begin{pmatrix} A^{-1} + P S^{-1} P^T & -P S^{-1} \\ -S^{-1} P^T & S^{-1} \end{pmatrix}.
+
+        :param inverse: Inverse ``A^{-1}`` of the current skew-symmetric matrix, of shape ``(..., m, m)``.
+        :param border: Coupling ``B`` of the current rows to the new ones, of shape ``(..., m, 2k)``.
+        :param corner: Skew-symmetric block ``C`` of the new rows and columns, of shape ``(..., 2k, 2k)``.
+        :return: The ratio, of the broadcast batch shape ``(...)``, and ``M^{-1}``, of shape
+            ``(..., m + 2k, m + 2k)`` (huge or non-finite when the ratio is zero).
+        :rtype: tuple[torch.Tensor, torch.Tensor]
+        :raises ValueError: If the shapes do not match.
+        :raises TypeError: If the dtypes or devices of the inputs differ, or the dtype is not supported.
+        """
+        inverse, border, corner, dtype = cls._prepare_extend(
+            "LowRankPfaffian.ratio_extend_and_inverse", inverse, border, corner
+        )
+        ratio, new_inverse = cls._call(LowRankPfaffian._ratio_extend_and_inverse_core, inverse, border, corner)
+        return cls._restore(ratio, dtype), cls._restore(new_inverse, dtype)
+
+    @classmethod
+    def ratio_and_r_inverse(cls, update: torch.Tensor, projected: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Ratio of :meth:`ratio` and the inverse of its matrix ``R``, from the projection ``A^{-1} u``.
+
+        :param update: Update vectors ``u``, of shape ``(..., n, 2k)``.
+        :param projected: Projection ``A^{-1} u``, of shape ``(..., n, 2k)``.
+        :return: The ratio, of shape ``(...)``, and ``R^{-1}``, of shape ``(..., 2k, 2k)`` (huge or non-finite
+            when the ratio is zero).
+        :rtype: tuple[torch.Tensor, torch.Tensor]
+        """
+        return cls._call(LowRankPfaffian._ratio_and_r_inverse_core, update, projected)
+
+    @classmethod
+    def _call(cls, core: Callable[..., T], *tensors: torch.Tensor) -> T:
+        # The hook the compiled variant overrides: run a core on validated tensors.
+        return core(*tensors)

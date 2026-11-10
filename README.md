@@ -158,6 +158,11 @@ for qubit in range(n_qubits):
     chain.extend(border, corners[torch.arange(shots), outcome])
 ```
 
+For long runs on small matrices, where PyTorch's per-operator overhead dominates, `CompiledLowRankPfaffian` (and
+`PfaffianChain(..., compiled=True)`, `PfaffianUpdater(..., compiled=True)`) runs the same computations through
+`torch.compile`: a few seconds of compilation on first use, then about 2x faster inverse updates on a single
+matrix, on CPU and CUDA. The eager `LowRankPfaffian` stays the default.
+
 Everything is batched, differentiable, and runs on CPU and CUDA. Gradients are exact for any skew-symmetric
 construction of the inputs, such as a covariance matrix computed from circuit parameters; the gradient with
 respect to a raw `inverse` leaf follows the skew-split convention of `pfaffian()`, while those with respect to
