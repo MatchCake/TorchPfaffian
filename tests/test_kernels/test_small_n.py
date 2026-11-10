@@ -133,3 +133,20 @@ class TestSmallN:
         assert result.shape == (0,)
         result.sum().backward()
         assert matrix.grad is not None and matrix.grad.shape == matrix.shape
+
+    def test_matching_tables_are_cached_and_usable_after_inference_mode(self):
+        from torch_pfaffian.kernels.small_n import _matching_index, _matching_signs
+
+        _matching_index.cache_clear()
+        _matching_signs.cache_clear()
+        matrix = torch.randn(2, 6, 6, dtype=torch.float64)
+        matrix = matrix - matrix.mT
+        with torch.inference_mode():
+            expected = small_pfaffian(matrix)  # builds the cached tables inside inference mode
+        assert _matching_index(6, matrix.device) is _matching_index(6, matrix.device)
+        assert _matching_signs(6, torch.float64, matrix.device) is _matching_signs(6, torch.float64, matrix.device)
+        leaf = matrix.clone().requires_grad_(True)
+        result = small_pfaffian(leaf)
+        result.sum().backward()  # the cached index tensors are saved for backward: they must not be inference tensors
+        torch.testing.assert_close(result.detach(), expected)
+        assert leaf.grad is not None

@@ -1,9 +1,13 @@
+import json
+import sys
+
 import library_comparison
 import numpy as np
 import pytest
 from library_comparison import (
     THREAD_VARIABLES,
     Measurement,
+    PeakMemory,
     best_time,
     load_results,
     max_relative_difference,
@@ -212,3 +216,39 @@ class TestLibraryComparison:
         assert len({len(line) for line in lines}) == 1
         assert sum(line.startswith("├") for line in lines) == 1  # "row" and "rank 2" are separate blocks
         assert any("torchpfaffian ratio ★" in line for line in lines)
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/self")
+    def test_peak_memory_sees_a_large_temporary_allocation(self):
+        size = 64 << 20
+
+        def allocate():
+            array = np.ones(size // 8)  # touched, so resident
+            return float(array[-1])
+
+        allocate()
+        assert 0.9 * size <= PeakMemory.measure("numpy", allocate) < 2 * size
+        assert PeakMemory.measure("numpy", lambda: None) < size // 16
+
+    def test_peak_memory_is_nan_without_proc(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(PeakMemory, "CLEAR_REFS_FILE", tmp_path / "missing" / "clear_refs")
+        assert PeakMemory.measure("numpy", lambda: None) != PeakMemory.measure("numpy", lambda: None)  # nan
+        monkeypatch.setattr(PeakMemory, "CLEAR_REFS_FILE", tmp_path / "clear_refs")
+        (tmp_path / "status").write_text("Name: python\n")
+        monkeypatch.setattr(PeakMemory, "STATUS_FILE", tmp_path / "status")
+        assert PeakMemory.measure("numpy", lambda: None) != PeakMemory.measure("numpy", lambda: None)
+
+    def test_measure_records_the_peak_memory(self, monkeypatch):
+        monkeypatch.setattr(library_comparison, "_import_pfapack", lambda: (None, None))
+        monkeypatch.setattr(library_comparison, "_import_torchpfaff", lambda: None)
+        monkeypatch.setattr(library_comparison, "_import_lrux", lambda: None)
+        monkeypatch.setattr(library_comparison, "TIME_BUDGET_SECONDS", 0.0)
+        monkeypatch.setattr(PeakMemory, "measure", staticmethod(lambda name, function: 123.0))
+        measurements = [item for item in measure(8, 2, "float64") if not item.method.endswith("(CUDA)")]
+        assert measurements and all(item.peak_memory_bytes == 123.0 for item in measurements)
+
+    def test_results_saved_before_the_memory_was_recorded_load(self, tmp_path):
+        item = {"dimension": 8, "batch": 4, "dtype": "float64", "method": "lrux", "seconds": 1e-3, "repeats": 3}
+        path = tmp_path / "old.json"
+        path.write_text(json.dumps({"header": "old", "measurements": [{**item, "max_relative_difference": 0.0}]}))
+        _, (loaded,) = load_results(path)
+        assert loaded.update == "" and loaded.peak_memory_bytes != loaded.peak_memory_bytes  # nan

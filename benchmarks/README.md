@@ -124,6 +124,8 @@ TorchPfaffian). Every method starts from the same matrices and their inverse. Th
 | `row x16` | 16 successive accepted row replacements, with immediate and delayed (`T = 4`) inverse updates; times are per update |
 
 `ratio` rows compute the ratio only; `ratio + inverse` rows also update the inverse, which the next move needs.
+Rows ending in `, compiled` use `CompiledLowRankPfaffian` (and `PfaffianUpdater(..., compiled=True)`); their
+first call, which compiles, is the agreement check and is not timed.
 The defaults are `--sizes 32 128 512 --batches 1 64`, and `--updates` selects the moves:
 
 ```bash
@@ -132,6 +134,30 @@ The defaults are `--sizes 32 128 512 --batches 1 64`, and `--updates` selects th
 ```
 
 The raw records go to `benchmarks/results/ratios-<timestamp>.json`.
+
+### Time and memory plots
+
+Every measurement also records the peak memory of one call of the whole batch: on CPU, the peak resident memory
+that the call adds to the process (Linux only, at a resolution of one 4 KiB page, so that it covers NumPy, torch
+and JAX alike); on CUDA, the peak of torch's allocator, which does not see JAX, so lrux on CUDA has no memory
+record. `plot_results.py` (seaborn and matplotlib, in the `dev` group) plots the time per matrix and the peak
+memory against the matrix size, with one figure per batch size (and per dtype for `--ratios`) and one panel per
+comparison: the Pfaffian and the Pfaffian with its gradient per dtype, or the ratio and the ratio with the updated
+inverse per low-rank update, with the Pfaffian of the updated matrix as the baseline in every panel. The color is
+the library, and the line style the device. The figures are saved as PNGs next to the results file:
+
+```bash
+~/.venvs/pfaffian-libraries/bin/python benchmarks/plot_results.py benchmarks/results/libraries-<timestamp>.json
+~/.venvs/pfaffian-libraries/bin/python benchmarks/plot_results.py benchmarks/results/ratios-*.json --output-directory plots
+```
+
+`--overview` also saves `overview.png`, one figure that compares the packages over every point of every file
+given, with one row per device (CPU, then CUDA) and the time and the peak memory side by side. On each input and
+device, each package is taken at its best method, and its time and peak memory are divided by those of the best
+package there: 1x is the best, 3x three times slower or heavier. The x-axis is the input size in bytes, which
+means the same for every operation, dtype and batch size, and each package has its own color and marker shape.
+torch's CUDA allocator counts cuBLAS's workspace (about 8 MiB) in every call that multiplies matrices, so small
+CUDA inputs read about 8 MB.
 
 ## Adding cases
 
