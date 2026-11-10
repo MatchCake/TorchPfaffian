@@ -18,6 +18,7 @@ except importlib.metadata.PackageNotFoundError:
 import warnings
 from collections.abc import Callable
 
+import numpy as np
 import torch
 
 from .kernels import log_magnitude_pfaffian, magnitude_pfaffian
@@ -50,6 +51,8 @@ LOW_PRECISION_DTYPES = (torch.float16, torch.bfloat16, torch.complex32)
 UPCAST_DTYPE = torch.float32
 UPCAST_COMPLEX_DTYPE = torch.complex64
 SUPPORTED_DTYPES = LU_DTYPES + LOW_PRECISION_DTYPES
+# Dtypes whose CPU results _all_finite tests with NumPy (which has no bfloat16 or complex32).
+_NUMPY_DTYPES = (torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
 
 
 def _check_dtype(function_name: str, dtype: torch.dtype) -> None:
@@ -310,7 +313,10 @@ def _pfaffian(
         # The Rust kernel is CPU-only. Small non-CPU inputs still take it, through the host, since the device
         # elimination is launch-bound there; larger ones use the device-native PyTorch strategy.
         if RustPfaffianParlettReid is not None and (matrix.device.type == "cpu" or _on_host(matrix)):
-            result = RustPfaffianParlettReid.apply(matrix)
+            # Without a graph to build, the forward is called directly: autograd's Function.apply costs about
+            # 20 us, more than the kernel itself on small inputs.
+            needs_graph = matrix.requires_grad and torch.is_grad_enabled()
+            result = RustPfaffianParlettReid.apply(matrix) if needs_graph else RustPfaffianParlettReid.forward(matrix)
         else:
             result = PfaffianParlettReid.apply(matrix)
     elif epsilon is not None:
@@ -320,7 +326,7 @@ def _pfaffian(
     else:
         result = PfaffianDet.apply(matrix)
 
-    if check_finite and not torch.isfinite(result).all():
+    if check_finite and not _all_finite(result):
         if matrix.dtype in LOW_PRECISION_DTYPES:
             # The unrolled kernel overflowed in half precision; the log-domain recovery needs an LU.
             return _pfaffian_upcast(matrix, sign, check_finite, epsilon, mask_roundoff_gradient, stacklevel + 1)
@@ -360,6 +366,20 @@ def _pfaffian(
                 stacklevel=stacklevel,
             )
     return result
+
+
+def _all_finite(result: torch.Tensor) -> bool:
+    """
+    Whether every entry of a Pfaffian result is finite.
+
+    :param result: The Pfaffians, of any shape.
+    :return: ``True`` when every entry is finite. A CPU result is tested by NumPy, which costs a microsecond
+        against the about 10 us of ``torch.isfinite(result).all()`` and its conversion to ``bool``.
+    :rtype: bool
+    """
+    if result.device.type == "cpu" and result.dtype in _NUMPY_DTYPES:
+        return bool(np.isfinite(result.detach().resolve_conj().numpy()).all())
+    return bool(torch.isfinite(result).all())
 
 
 def _on_host(matrix: torch.Tensor) -> bool:

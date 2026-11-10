@@ -1,8 +1,8 @@
 use half::f16;
 use num_complex::Complex;
 use num_traits::{One, Zero};
-use numpy::ndarray::{Array1, Array2, Axis};
-use numpy::{Complex32, Complex64, IntoPyArray, PyArray1, PyReadonlyArray3};
+use numpy::ndarray::{Array1, Array2, Array3, Axis};
+use numpy::{Complex32, Complex64, IntoPyArray, PyArray1, PyArray3, PyReadonlyArray3};
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use std::ops::{Add, Div, Mul, Neg, Sub};
@@ -445,6 +445,236 @@ fn signed_slog_pfaffian_c64<'py>(
     (Array1::from(phases).into_pyarray(py), Array1::from(logs).into_pyarray(py))
 }
 
+/// Machine epsilon of a scalar type's real precision, as ``torch.finfo(dtype).eps``.
+trait Precision {
+    const EPSILON: f64;
+}
+
+impl Precision for f32 {
+    const EPSILON: f64 = f32::EPSILON as f64;
+}
+
+impl Precision for f64 {
+    const EPSILON: f64 = f64::EPSILON;
+}
+
+impl Precision for Complex<f32> {
+    const EPSILON: f64 = f32::EPSILON as f64;
+}
+
+impl Precision for Complex<f64> {
+    const EPSILON: f64 = f64::EPSILON;
+}
+
+/// Exponents of ``eps`` in the singularity tests of [`flagged_inverse_from_flat`], as in
+/// ``PfaffianStrategy.SINGULARITY_RTOL_EXPONENT`` and ``INVERSE_RESIDUAL_RTOL_EXPONENT``.
+const SINGULARITY_RTOL_EXPONENT: f64 = 0.75;
+const INVERSE_RESIDUAL_RTOL_EXPONENT: f64 = 0.5;
+
+/// Inverse of one square matrix (flat row-major) with the flags of ``PfaffianStrategy._flagged_inverse``.
+///
+/// An LU factorization with partial pivoting gives the rank flag: a zero pivot, or a pivot ratio
+/// ``min|U_ii| / max|U_ii|`` at most ``eps^0.75`` (NaN-safe: a NaN ratio is flagged). A rank-flagged
+/// matrix gets the identity as its inverse. Otherwise the inverse is solved from the factors, and the
+/// residual flag is set when ``max |A A^{-1} - I|`` exceeds ``eps^0.5`` (or is NaN). Returns
+/// ``(inverse, rank_flag, residual_flag)``.
+fn flagged_inverse_from_flat<T>(matrix: &[T], dimension: usize) -> (Vec<T>, bool, bool)
+where
+    T: Copy
+        + Zero
+        + One
+        + Magnitude
+        + Precision
+        + Neg<Output = T>
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>,
+{
+    let size = dimension;
+    let identity = || {
+        let mut eye = vec![T::zero(); size * size];
+        for index in 0..size {
+            eye[index * size + index] = T::one();
+        }
+        eye
+    };
+    let mut factors = matrix.to_vec();
+    let mut permutation: Vec<usize> = (0..size).collect();
+    let mut zero_pivot = false;
+    for step in 0..size {
+        let mut pivot_row = step;
+        let mut best = factors[step * size + step].magnitude();
+        for row in (step + 1)..size {
+            let candidate = factors[row * size + step].magnitude();
+            if candidate > best {
+                best = candidate;
+                pivot_row = row;
+            }
+        }
+        if pivot_row != step {
+            for column in 0..size {
+                factors.swap(step * size + column, pivot_row * size + column);
+            }
+            permutation.swap(step, pivot_row);
+        }
+        let pivot = factors[step * size + step];
+        if pivot.magnitude() == 0.0 {
+            zero_pivot = true; // LAPACK's info > 0: the factorization continues with this column
+            continue;
+        }
+        let (upper, lower) = factors.split_at_mut((step + 1) * size);
+        let pivot_row_values = &upper[step * size..(step + 1) * size];
+        for row in 0..(size - step - 1) {
+            let row_values = &mut lower[row * size..(row + 1) * size];
+            let factor = row_values[step] / pivot;
+            row_values[step] = factor;
+            for column in (step + 1)..size {
+                row_values[column] = row_values[column] - factor * pivot_row_values[column];
+            }
+        }
+    }
+    let mut smallest = f64::INFINITY;
+    let mut largest = 0.0_f64;
+    for index in 0..size {
+        let magnitude = factors[index * size + index].magnitude();
+        smallest = if magnitude.is_nan() || smallest.is_nan() { f64::NAN } else { smallest.min(magnitude) };
+        largest = largest.max(magnitude);
+    }
+    let threshold = T::EPSILON.powf(SINGULARITY_RTOL_EXPONENT) * largest;
+    // A NaN ratio or threshold is flagged, as PyTorch's ``~(min > threshold)``.
+    if zero_pivot || smallest.is_nan() || threshold.is_nan() || smallest <= threshold {
+        return (identity(), true, false);
+    }
+    // A^{-1} = U^{-1} L^{-1} P, solved column by column into a transposed buffer (contiguous writes).
+    let mut transposed = vec![T::zero(); size * size];
+    for column in 0..size {
+        let solution = &mut transposed[column * size..(column + 1) * size];
+        for row in 0..size {
+            solution[row] = if permutation[row] == column { T::one() } else { T::zero() };
+        }
+        for row in 0..size {
+            let mut sum = solution[row];
+            for inner in 0..row {
+                sum = sum - factors[row * size + inner] * solution[inner];
+            }
+            solution[row] = sum;
+        }
+        for row in (0..size).rev() {
+            let mut sum = solution[row];
+            for inner in (row + 1)..size {
+                sum = sum - factors[row * size + inner] * solution[inner];
+            }
+            solution[row] = sum / factors[row * size + row];
+        }
+    }
+    let mut inverse = vec![T::zero(); size * size];
+    for row in 0..size {
+        for column in 0..size {
+            inverse[row * size + column] = transposed[column * size + row];
+        }
+    }
+    // Residual max |A A^{-1} - I|, with A A^{-1} = A (A^{-T})^T read from the transposed buffer.
+    let mut residual = 0.0_f64;
+    for row in 0..size {
+        let matrix_row = &matrix[row * size..(row + 1) * size];
+        for column in 0..size {
+            let solution = &transposed[column * size..(column + 1) * size];
+            let mut sum = T::zero();
+            for inner in 0..size {
+                sum = sum + matrix_row[inner] * solution[inner];
+            }
+            if row == column {
+                sum = sum - T::one();
+            }
+            let magnitude = sum.magnitude();
+            residual = if magnitude.is_nan() || residual.is_nan() { f64::NAN } else { residual.max(magnitude) };
+        }
+    }
+    let residual_flag = residual.is_nan() || residual > T::EPSILON.powf(INVERSE_RESIDUAL_RTOL_EXPONENT);
+    (inverse, false, residual_flag)
+}
+
+/// ``(inverse, rank_flag, residual_flag)`` of a batch, as numpy arrays.
+type FlaggedArrays<'py, T> = (Bound<'py, PyArray3<T>>, Bound<'py, PyArray1<bool>>, Bound<'py, PyArray1<bool>>);
+
+/// [`flagged_inverse_from_flat`] over a ``(batch, n, n)`` view, parallel above a threshold, as numpy arrays.
+fn flagged_inverse_batch<'py, T>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, T>,
+) -> FlaggedArrays<'py, T>
+where
+    T: numpy::Element
+        + Copy
+        + Zero
+        + One
+        + Magnitude
+        + Precision
+        + Neg<Output = T>
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>
+        + Send
+        + Sync,
+{
+    let (flats, dimension) = flat_matrices(&matrix);
+    let batch = flats.len();
+    let results: Vec<(Vec<T>, bool, bool)> = py.allow_threads(|| {
+        if batch >= PARALLEL_BATCH_THRESHOLD {
+            flats.par_iter().map(|flat| flagged_inverse_from_flat(flat, dimension)).collect()
+        } else {
+            flats.iter().map(|flat| flagged_inverse_from_flat(flat, dimension)).collect()
+        }
+    });
+    let mut inverses = Vec::with_capacity(batch * dimension * dimension);
+    let mut rank_flags = Vec::with_capacity(batch);
+    let mut residual_flags = Vec::with_capacity(batch);
+    for (inverse, rank_flag, residual_flag) in results {
+        inverses.extend(inverse);
+        rank_flags.push(rank_flag);
+        residual_flags.push(residual_flag);
+    }
+    let inverses = Array3::from_shape_vec((batch, dimension, dimension), inverses).expect("shape matches");
+    (inverses.into_pyarray(py), Array1::from(rank_flags).into_pyarray(py), Array1::from(residual_flags).into_pyarray(py))
+}
+
+/// Inverse and singularity flags of a batch of ``float64`` matrices: ``(inverse, rank_flag, residual_flag)``.
+#[pyfunction]
+fn flagged_inverse_f64<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, f64>,
+) -> FlaggedArrays<'py, f64> {
+    flagged_inverse_batch(py, matrix)
+}
+
+/// Inverse and singularity flags of a batch of ``float32`` matrices: ``(inverse, rank_flag, residual_flag)``.
+#[pyfunction]
+fn flagged_inverse_f32<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, f32>,
+) -> FlaggedArrays<'py, f32> {
+    flagged_inverse_batch(py, matrix)
+}
+
+/// Inverse and singularity flags of a batch of ``complex128`` matrices.
+#[pyfunction]
+fn flagged_inverse_c128<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, Complex64>,
+) -> FlaggedArrays<'py, Complex64> {
+    flagged_inverse_batch(py, matrix)
+}
+
+/// Inverse and singularity flags of a batch of ``complex64`` matrices.
+#[pyfunction]
+fn flagged_inverse_c64<'py>(
+    py: Python<'py>,
+    matrix: PyReadonlyArray3<'py, Complex32>,
+) -> FlaggedArrays<'py, Complex32> {
+    flagged_inverse_batch(py, matrix)
+}
+
 #[pymodule]
 fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(signed_pfaffian_f64, module)?)?;
@@ -456,6 +686,10 @@ fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(signed_slog_pfaffian_f32, module)?)?;
     module.add_function(wrap_pyfunction!(signed_slog_pfaffian_c128, module)?)?;
     module.add_function(wrap_pyfunction!(signed_slog_pfaffian_c64, module)?)?;
+    module.add_function(wrap_pyfunction!(flagged_inverse_f64, module)?)?;
+    module.add_function(wrap_pyfunction!(flagged_inverse_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(flagged_inverse_c128, module)?)?;
+    module.add_function(wrap_pyfunction!(flagged_inverse_c64, module)?)?;
     Ok(())
 }
 

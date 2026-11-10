@@ -148,7 +148,11 @@ class TestTorchPfaffian:
         pytest.importorskip("torch_pfaffian._rust")
         with mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake:
             fake.apply.return_value = torch.zeros(())
-            pfaffian(self._large_skew_matrix(), sign=True)
+            fake.forward.return_value = torch.zeros(())
+            pfaffian(self._large_skew_matrix(), sign=True)  # no graph to build: the forward is called directly
+            fake.forward.assert_called_once()
+            fake.apply.assert_not_called()
+            pfaffian(self._large_skew_matrix().requires_grad_(True), sign=True)  # through autograd
             fake.apply.assert_called_once()
 
     def test_pfaffian_routes_sign_true_to_python_when_rust_unavailable(self):
@@ -305,9 +309,9 @@ class TestTorchPfaffian:
         rng = np.random.default_rng(TEST_SEED)
         matrix = torch.tensor(_rand_skew_complex(8, rng), dtype=torch.complex128)
         with mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust:
-            fake_rust.apply.return_value = torch.zeros((), dtype=torch.complex128)
+            fake_rust.forward.return_value = torch.zeros((), dtype=torch.complex128)
             pfaffian(matrix, sign=True)
-            fake_rust.apply.assert_called_once()
+            fake_rust.forward.assert_called_once()
 
     def test_pfaffian_sign_true_complex_emits_no_imaginary_discard_warning(self):
         rng = np.random.default_rng(TEST_SEED)

@@ -38,6 +38,14 @@ changes the package's behaviour, API, documentation or packaging.
 - `slog_pfaffian()`'s elimination runs about a dozen operators per step, with the same in-place swaps and
   updates as `PfaffianParlettReid`, which makes it 1.4 to 2x faster on CUDA and keeps it free of host
   synchronization (#34).
+- A Rust kernel (`flagged_inverse_*`) computes the inverse and singularity flags of the backward on CPU (and
+  for small CUDA inputs, on the host), with the adjugate and the gradient formed in NumPy: the signed
+  gradient of 256 matrices with `m = 32` takes 19 us per matrix instead of 62 us, and with `m = 64` 93 us
+  instead of 296 us. It is used up to `m = 40`, and up to `m = 96` for batches of 8 or more, where it beats
+  LAPACK.
+- `pfaffian()` calls the Rust strategy's forward directly when no graph is built, skipping autograd's
+  `Function.apply`, and tests the finiteness of CPU results with NumPy: a single `8 x 8` Pfaffian takes
+  18 us instead of 55 us.
 - `benchmarks/pfapack_comparison.py` is renamed `benchmarks/library_comparison.py`. It also times
   [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
   [lrux](https://github.com/ChenAo-Phys/lrux), runs them and TorchPfaffian on the GPU when CUDA is
