@@ -25,6 +25,13 @@ changes the package's behaviour, API, documentation or packaging.
 
 ### Changed
 
+- Signed `pfaffian()` on CUDA is up to 67x faster (#34). Inputs with `batch * m^2 <= 2^20`
+  (`AUTO_HOST_MAX_BATCH_SQUARE`) are computed by the Rust kernel on the host, with the backward on the device,
+  since the elimination on the device is bound by its kernel launches there: `m = 32` takes 0.18 ms instead of
+  6.7 ms, `m = 128` 0.40 ms instead of 27 ms on one matrix on an RTX 3070. `PfaffianParlettReid`, which larger
+  inputs still use, runs about a dozen operators per elimination step instead of about thirty (one gather and
+  one scatter per swap, two in-place multiply-adds, no zeroing), which makes it 1.1 to 1.7x faster on CUDA
+  (`m = 256` with a batch of 256: 77 ms instead of 108 ms).
 - `benchmarks/pfapack_comparison.py` is renamed `benchmarks/library_comparison.py`. It also times
   [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
   [lrux](https://github.com/ChenAo-Phys/lrux), runs them and TorchPfaffian on the GPU when CUDA is

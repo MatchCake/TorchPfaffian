@@ -35,6 +35,13 @@ AUTO_SMALL_MAX = 6
 # [[0, B], [-B^T, 0]] are routed to PfaffianBlockDet (one n x n determinant). Below this size the block-form
 # check and the strategy's overhead outweigh its gain over the general paths (measured on CPU).
 AUTO_BLOCK_DET_MIN_NUMEL = 2**14
+# Signed inputs on another device (CUDA) with batch * m^2 at most AUTO_HOST_MAX_BATCH_SQUARE are computed by the
+# Rust kernel on the host and the result copied back. On the device, each of the m / 2 elimination steps of
+# PfaffianParlettReid costs about a dozen kernel launches (about 0.2 ms per step on an RTX 3070), whatever the
+# batch; on the host, the Rust kernel costs about 4e-11 s * batch * m^3 on 12 cores, and up to 4x that in some
+# process states (measured, not explained). The two meet between batch * m^2 = 2^20 and 2^22; 2^20 keeps the host
+# route faster in both states (m = 256 with a batch of 16 takes 4 to 16 ms on the host, 22 ms on the device).
+AUTO_HOST_MAX_BATCH_SQUARE = 2**20
 # Dtypes with a PyTorch LU factorization, which every path beyond the unrolled small kernel needs.
 LU_DTYPES = (torch.float32, torch.float64, torch.complex64, torch.complex128)
 # Dtypes without one (and, for complex32, without most arithmetic kernels). They are computed in
@@ -159,6 +166,7 @@ def pfaffian(
     ``m <= AUTO_SMALL_MAX``                     ``PfaffianSmall``            exact unrolled kernel (all dtypes)
     block form, large input (see below)         ``PfaffianBlockDet``         one ``n x n`` determinant
     ``sign=True``, Rust built, CPU input        ``RustPfaffianParlettReid``  fastest signed path (native Rust)
+    ``sign=True``, Rust built, small GPU input  ``RustPfaffianParlettReid``  on the host: launch-bound on GPU
     ``sign=True``, otherwise                    ``PfaffianParlettReid``      GPU-native and pure-Python fallback
     ``sign=False``, ``epsilon`` given           ``magnitude_pfaffian``       log-domain magnitude with floor
     ``sign=False``, grad needed                 ``PfaffianFDBPf``            magnitude only; robust backward
@@ -168,10 +176,14 @@ def pfaffian(
     Matrices with last dimension ``m <= AUTO_SMALL_MAX`` take the exact unrolled ``PfaffianSmall`` path
     first, regardless of ``sign`` and device (``|Pf|`` for ``sign=False``); it is exact for every dtype
     and differentiable end-to-end. For larger matrices the Rust kernel runs on CPU (in real and complex
-    precisions), so a non-CPU (e.g. CUDA) input is routed to ``PfaffianParlettReid``, which runs
-    natively on the input device and avoids a host round-trip. All signed strategies compute the correct
-    complex signed Pfaffian without discarding the imaginary part and are differentiable end-to-end for
-    real and complex inputs (the complex backward follows PyTorch's Wirtinger convention).
+    precisions). A non-CPU (e.g. CUDA) input is computed by the same kernel on the host when it is small
+    (``batch * m^2 = matrix.numel() <= AUTO_HOST_MAX_BATCH_SQUARE``), since the device elimination is
+    bound by its kernel launches there: the matrix is copied to the host and the Pfaffian back, which
+    synchronizes with the device, and the backward runs on the device. Larger inputs, and inputs while a
+    CUDA graph is being captured, are routed to ``PfaffianParlettReid``, which runs natively on the input
+    device without a host round-trip. All signed strategies compute the correct complex signed Pfaffian
+    without discarding the imaginary part and are differentiable end-to-end for real and complex inputs
+    (the complex backward follows PyTorch's Wirtinger convention).
 
     Inputs with ``m > AUTO_SMALL_MAX`` and at least ``AUTO_BLOCK_DET_MIN_NUMEL`` entries in total are tested
     for the block form ``[[0, B], [-B^T, 0]]`` (both diagonal blocks exactly zero for every batch element).
@@ -295,8 +307,9 @@ def _pfaffian(
             # Same floor as the PfaffianDet / PfaffianFDBPf magnitude paths this route replaces.
             result = torch.clamp(result.abs(), min=PfaffianStrategy.EPSILON**0.5)
     elif sign:
-        # The Rust kernel is CPU-only, so non-CPU inputs use the device-native PyTorch strategy.
-        if RustPfaffianParlettReid is not None and matrix.device.type == "cpu":
+        # The Rust kernel is CPU-only. Small non-CPU inputs still take it, through the host, since the device
+        # elimination is launch-bound there; larger ones use the device-native PyTorch strategy.
+        if RustPfaffianParlettReid is not None and (matrix.device.type == "cpu" or _on_host(matrix)):
             result = RustPfaffianParlettReid.apply(matrix)
         else:
             result = PfaffianParlettReid.apply(matrix)
@@ -347,6 +360,20 @@ def _pfaffian(
                 stacklevel=stacklevel,
             )
     return result
+
+
+def _on_host(matrix: torch.Tensor) -> bool:
+    """
+    Whether a signed input on a non-CPU device is computed by the Rust kernel on the host.
+
+    :param matrix: Skew-symmetric matrix of shape ``(..., m, m)`` on a non-CPU device.
+    :return: ``True`` when ``batch * m^2 <= AUTO_HOST_MAX_BATCH_SQUARE`` and no CUDA graph is being captured (a
+        capture cannot copy to the host).
+    :rtype: bool
+    """
+    if matrix.numel() > AUTO_HOST_MAX_BATCH_SQUARE:  # batch * m^2
+        return False
+    return not (matrix.device.type == "cuda" and torch.cuda.is_current_stream_capturing())
 
 
 def _pfaffian_upcast(

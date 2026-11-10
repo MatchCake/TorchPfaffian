@@ -161,3 +161,20 @@ class TestPfaffianParlettReid:
             needs_input_grad = (False,)
 
         assert PfaffianParlettReid.backward(_Context(), torch.ones_like(pfaffian)) is None
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    @pytest.mark.parametrize("dimension", [2, 4, 8, 14])
+    def test_forward_matches_the_rust_kernel_with_pivoting(self, dimension, dtype):
+        # Random batches pivot at different rows in every step, which exercises the cyclic shift and its sign.
+        rust = pytest.importorskip("torch_pfaffian.strategies.pfaffian_rust_parlett_reid").RustPfaffianParlettReid
+        generator = torch.Generator().manual_seed(TEST_SEED + dimension)
+        entries = torch.randn(16, dimension, dimension, generator=generator, dtype=torch.float64)
+        if dtype.is_complex:
+            entries = torch.complex(entries, torch.randn(entries.shape, generator=generator, dtype=torch.float64))
+        matrix = entries - entries.mT
+        torch.testing.assert_close(
+            PfaffianParlettReid.apply(matrix),
+            rust.apply(matrix),
+            atol=ATOL_MATRIX_COMPARISON,
+            rtol=RTOL_MATRIX_COMPARISON,
+        )

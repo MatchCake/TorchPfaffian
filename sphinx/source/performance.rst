@@ -94,4 +94,5 @@ Reading the results
   parallel while pfapack is called on one matrix at a time.
 - The gradient costs a few times the forward pass. It is the main reason to use TorchPfaffian: pfapack has
   none, and it would otherwise need a separate inverse or a finite-difference approximation.
-- On a GPU, TorchPfaffian runs the whole computation on the device (not measured here).
+- On a GPU, a small signed input is computed on the host by the Rust kernel (the elimination on the device
+  is bound by its kernel launches there), and a larger one on the device (not measured here).

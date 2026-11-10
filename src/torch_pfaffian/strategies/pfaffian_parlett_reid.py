@@ -10,7 +10,12 @@ class PfaffianParlettReid(PfaffianStrategy):
     Compute the signed Pfaffian of a skew-symmetric matrix with the Parlett-Reid algorithm.
 
     The forward performs a batched skew-tridiagonalization with partial pivoting: the batch is
-    processed together and only the ``n / 2`` column-elimination steps are sequential. The result
+    processed together and only the ``n / 2`` column-elimination steps are sequential. Each step swaps the
+    pivot's row and column into place with one gather and one scatter each and updates the trailing block in
+    place with two fused multiply-adds, without zeroing the eliminated entries (they are not read again), and the
+    sign, the product and the zero-pivot test are formed once after the loop: about a dozen operators per step.
+    On CUDA a step of a small input costs its kernel launches rather than its arithmetic, so that is the run
+    time there (``pfaffian()`` sends small CUDA inputs to the Rust kernel on the host instead). The result
     is the signed Pfaffian, unlike the determinant-based strategies which return only the magnitude.
     The backward uses the closed form ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T`` via the Pfaffian
     adjugate, with no autograd graph over the elimination. For invertible inputs this is a single
@@ -30,46 +35,39 @@ class PfaffianParlettReid(PfaffianStrategy):
         if dimension == 0:
             return torch.ones(matrix.shape[:-2], dtype=matrix.dtype, device=matrix.device)
 
-        working = matrix.reshape(-1, dimension, dimension).clone()  # (batch, 2n, 2n)
+        working = matrix.reshape(-1, dimension, dimension).clone()  # (batch, 2n, 2n), eliminated in place
         batch = working.shape[0]
-        batch_index = torch.arange(batch, device=matrix.device)
-        sign = torch.ones(batch, dtype=matrix.dtype, device=matrix.device)
-        valid = torch.ones(batch, dtype=torch.bool, device=matrix.device)
-        epsilon = PfaffianStrategy.EPSILON
-
+        rows = torch.arange(batch, device=matrix.device)[:, None].expand(batch, 2)  # (batch, 2)
+        offsets = []
         for column in range(0, dimension - 2, 2):
-            sub_column = working[:, column + 2 :, column].abs()  # (batch, 2n - column - 2)
-            pivot_magnitude, pivot_relative = sub_column.max(dim=1)  # (batch,), (batch,)
-            pivot_row = pivot_relative + column + 2  # (batch,)
-            pivot_condition = pivot_magnitude > working[:, column + 1, column].abs()  # (batch,)
-            mask = pivot_condition[:, None]  # (batch, 1)
-
-            row_fixed = working[:, column + 1, :].clone()
-            row_pivot = working[batch_index, pivot_row, :]
-            working[:, column + 1, :] = torch.where(mask, row_pivot, row_fixed)
-            working[batch_index, pivot_row, :] = torch.where(mask, row_fixed, row_pivot)
-            col_fixed = working[:, :, column + 1].clone()
-            col_pivot = working[batch_index, :, pivot_row]
-            working[:, :, column + 1] = torch.where(mask, col_pivot, col_fixed)
-            working[batch_index, :, pivot_row] = torch.where(mask, col_fixed, col_pivot)
-            sign = torch.where(pivot_condition, -sign, sign)
-
-            pivot_value = working[:, column + 1, column]  # (batch,)
-            zero_pivot = pivot_value.abs() < epsilon
-            valid = valid & ~zero_pivot
-            safe_pivot = torch.where(zero_pivot, torch.ones_like(pivot_value), pivot_value)
-            tau = working[:, column + 2 :, column] / safe_pivot[:, None]  # (batch, 2n - column - 2)
+            # Partial pivoting: the largest |A[p, column]| for p > column (the first one on ties, so column + 1 when
+            # it is as large as any) is swapped into row and column column + 1. The two rows, then the two
+            # columns, are read with one gather and written back swapped with one scatter; when p = column + 1
+            # both writes carry the same values.
+            offset = working[:, column + 1 :, column].abs().argmax(dim=1)  # (batch,), p - column - 1
+            pair = torch.stack([offset.new_full((batch,), column + 1), offset + (column + 1)], dim=1)  # (batch, 2)
+            working[rows, pair] = working[rows, pair].flip(1)  # rows p and column + 1, (batch, 2, 2n)
+            working[rows, :, pair] = working[rows, :, pair].flip(1)  # their columns
+            offsets.append(offset)
+            # Schur complement of the pivot block onto the trailing block, in place. The entries left of and
+            # above the trailing block are not read again, so they are not zeroed.
+            tau = working[:, column + 2 :, column] / working[:, column + 1, column, None]  # (batch, 2n - column - 2)
             column_next = working[:, column + 2 :, column + 1]  # (batch, 2n - column - 2)
-            outer = tau[:, :, None] * column_next[:, None, :]  # (batch, m, m)
-            working[:, column + 2 :, column + 2 :].add_(outer - outer.transpose(-1, -2))
-            working[:, column + 2 :, column] = 0
-            working[:, column, column + 2 :] = 0
-            working[:, column + 2 :, column + 1] = 0
-            working[:, column + 1, column + 2 :] = 0
+            trailing = working[:, column + 2 :, column + 2 :]
+            trailing.addcmul_(tau[:, :, None], column_next[:, None, :])
+            trailing.addcmul_(column_next[:, :, None], tau[:, None, :], value=-1)
 
         super_index = torch.arange(0, dimension, 2, device=matrix.device)
         super_entries = working[:, super_index, super_index + 1]  # (batch, n)
-        raw_pfaffian = sign * super_entries.prod(dim=1)  # (batch,)
+        pivots = working[:, super_index[:-1] + 1, super_index[:-1]]  # (batch, n - 1), A'[c + 1, c]
+        raw_pfaffian = super_entries.prod(dim=1)  # (batch,)
+        if not offsets:  # a 2 x 2 matrix: no elimination step
+            return raw_pfaffian.reshape(matrix.shape[:-2])
+        swaps = (torch.stack(offsets, dim=1) != 0).sum(dim=1)  # (batch,), each swap flips the sign
+        raw_pfaffian = (1 - 2 * (swaps % 2)) * raw_pfaffian
+        # A pivot below EPSILON is declared an exact zero, as in the other linear-domain strategies; the steps
+        # after it divide by it, but each batch element is eliminated independently, so only it is affected.
+        valid = pivots.abs().amin(dim=1) >= PfaffianStrategy.EPSILON
         pfaffian = torch.where(valid, raw_pfaffian, torch.zeros_like(raw_pfaffian))
         return pfaffian.reshape(matrix.shape[:-2])
 
