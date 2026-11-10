@@ -1,4 +1,5 @@
 import functools
+import warnings
 
 import pytest
 import torch
@@ -120,3 +121,33 @@ class TestCompiledLowRankPfaffian:
             atol=ATOL_SCALAR_COMPARISON,
             rtol=RTOL_SCALAR_COMPARISON,
         )
+
+    def test_a_core_that_fails_to_compile_runs_eagerly(self, monkeypatch):
+        def failing(core):
+            def call(*tensors):
+                raise RuntimeError("compiler unavailable\nmore details")
+
+            return call
+
+        monkeypatch.setattr(CompiledLowRankPfaffian, "_compiled", staticmethod(failing))
+        monkeypatch.setattr(CompiledLowRankPfaffian, "_EAGER_CORES", set())
+        inverse = torch.linalg.inv(self._skew(BATCH, DIMENSION, DIMENSION))
+        update = self._random(BATCH, DIMENSION, 2)
+        with pytest.warns(RuntimeWarning, match="compiler unavailable"):
+            ratio = CompiledLowRankPfaffian.ratio(inverse, update)
+        torch.testing.assert_close(
+            ratio, LowRankPfaffian.ratio(inverse, update), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+        assert CompiledLowRankPfaffian._EAGER_CORES == {LowRankPfaffian._ratio_core}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # warned once: the core now runs eagerly without trying to compile
+            CompiledLowRankPfaffian.ratio(inverse, update)
+
+    def test_an_error_of_the_computation_itself_is_raised(self, monkeypatch):
+        def failing_core(*tensors):
+            raise ValueError("bad input")
+
+        monkeypatch.setattr(CompiledLowRankPfaffian, "_EAGER_CORES", set())
+        with pytest.raises(ValueError, match="bad input"):
+            CompiledLowRankPfaffian._call(failing_core, torch.zeros(1))
+        assert not CompiledLowRankPfaffian._EAGER_CORES

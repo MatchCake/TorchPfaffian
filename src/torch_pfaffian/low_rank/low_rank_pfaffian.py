@@ -170,20 +170,27 @@ class LowRankPfaffian:
 
     @staticmethod
     def _ratio_replace_core(inverse: torch.Tensor, index: torch.Tensor, change: torch.Tensor) -> torch.Tensor:
-        column = torch.take_along_dim(inverse, index[..., None, None], dim=-1)[..., 0]  # (..., n), A^{-1} e_i
+        column = LowRankPfaffian._column(inverse, index)  # (..., n), A^{-1} e_i
         return 1 + (change * column).sum(dim=-1)
 
     @staticmethod
     def _ratio_replace_and_inverse_core(
         inverse: torch.Tensor, index: torch.Tensor, change: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        column = torch.take_along_dim(inverse, index[..., None, None], dim=-1)[..., 0]  # (..., n), A^{-1} e_i
+        column = LowRankPfaffian._column(inverse, index)  # (..., n), A^{-1} e_i
         ratio = 1 + (change * column).sum(dim=-1)
         row = LowRankPfaffian._matmul(change[..., None, :], inverse)  # (..., 1, n), c^T A^{-1} = -(A^{-1} c)^T
         # (A^{-1} e_i)(A^{-1} c)^T - (A^{-1} c)(A^{-1} e_i)^T = [col, row^T] @ [-row; col^T]
         left = torch.cat([column[..., :, None], row.mT], dim=-1)  # (..., n, 2)
         right = torch.cat([-row, column[..., None, :]], dim=-2) / ratio[..., None, None]  # (..., 2, n)
         return ratio, LowRankPfaffian.add_product(inverse, left, right)
+
+    @staticmethod
+    def _column(inverse: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+        # Column i of the skew-symmetric A^{-1} as minus its row i: the same values, and a row gather, which
+        # torch.compile's C++ backend fuses correctly (torch 2.10 generated invalid code for the column gather
+        # fused with the concatenation of _ratio_replace_and_inverse_core).
+        return -torch.take_along_dim(inverse, index[..., None, None], dim=-2)[..., 0, :]  # (..., n)
 
     @staticmethod
     def _ratio_extend_core(inverse: torch.Tensor, border: torch.Tensor, corner: torch.Tensor) -> torch.Tensor:
