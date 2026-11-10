@@ -55,53 +55,36 @@ def parlett_reid_slog(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]
             torch.zeros(batch_shape, dtype=real_dtype, device=device),
         )
 
-    working = matrix.reshape(-1, dimension, dimension).clone()  # (batch, m, m)
+    working = matrix.reshape(-1, dimension, dimension).clone()  # (batch, m, m), eliminated in place
     batch = working.shape[0]
-    batch_index = torch.arange(batch, device=device)
-    phase = torch.ones(batch, dtype=dtype, device=device)
-    log_abs = torch.zeros(batch, dtype=real_dtype, device=device)
-    alive = torch.ones(batch, dtype=torch.bool, device=device)
-    zero_log = torch.zeros((), dtype=real_dtype, device=device)
-    one_phase = torch.ones((), dtype=dtype, device=device)
-
+    rows = torch.arange(batch, device=device)[:, None].expand(batch, 2)  # (batch, 2)
+    offsets = []
     for column in range(0, dimension - 2, 2):
-        # Partial pivoting: bring the largest |a[column, row]| (row > column) into position (column, column + 1).
-        pivot_row = torch.argmax(working[:, column, column + 1 :].abs(), dim=1) + column + 1
-        need_swap = pivot_row != (column + 1)
-        row_next = working[:, column + 1, :].clone()
-        row_pivot = working[batch_index, pivot_row, :]
-        working[:, column + 1, :] = row_pivot
-        working[batch_index, pivot_row, :] = torch.where(need_swap[:, None], row_next, row_pivot)
-        col_next = working[:, :, column + 1].clone()
-        col_pivot = working[batch_index, :, pivot_row]
-        working[:, :, column + 1] = col_pivot
-        working[batch_index, :, pivot_row] = torch.where(need_swap[:, None], col_next, col_pivot)
-        phase = torch.where(need_swap, -phase, phase)
-
-        pivot = working[:, column, column + 1]
-        abs_pivot = pivot.abs()
-        is_zero = abs_pivot == 0
-        alive = alive & ~is_zero
-        safe_abs = torch.where(is_zero, torch.ones_like(abs_pivot), abs_pivot)
-        safe_pivot = torch.where(is_zero, one_phase, pivot)
-        phase = phase * (safe_pivot / safe_abs)
-        log_abs = log_abs + torch.where(is_zero, zero_log, safe_abs.log())
-
-        # Schur complement of the leading 2x2 block onto the trailing submatrix.
-        first_row_tail = working[:, column, column + 2 :]  # (batch, m - column - 2)
+        # Partial pivoting: the largest |a[column, p]| (p > column) is swapped into position (column, column + 1).
+        # The two rows, then the two columns, are read with one gather and written back swapped with one scatter;
+        # when p = column + 1 both writes carry the same values.
+        offset = torch.argmax(working[:, column, column + 1 :].abs(), dim=1)  # (batch,), p - column - 1
+        pair = torch.stack([offset.new_full((batch,), column + 1), offset + (column + 1)], dim=1)  # (batch, 2)
+        working[rows, pair] = working[rows, pair].flip(1)
+        working[rows, :, pair] = working[rows, :, pair].flip(1)
+        offsets.append(offset)
+        # Schur complement of the leading 2x2 block onto the trailing block, in place. An exact zero pivot makes
+        # the steps after it non-finite for that batch element only; its result is replaced below.
+        tau = working[:, column, column + 2 :] / working[:, column, column + 1, None]  # (batch, m - column - 2)
         second_row_tail = working[:, column + 1, column + 2 :]  # (batch, m - column - 2)
-        update = second_row_tail.unsqueeze(-1) * first_row_tail.unsqueeze(-2)
-        update = update - update.transpose(-1, -2)
-        working[:, column + 2 :, column + 2 :] += update / safe_pivot[:, None, None]
+        trailing = working[:, column + 2 :, column + 2 :]
+        trailing.addcmul_(second_row_tail[:, :, None], tau[:, None, :])
+        trailing.addcmul_(tau[:, :, None], second_row_tail[:, None, :], value=-1)
 
-    last = working[:, dimension - 2, dimension - 1]
-    abs_last = last.abs()
-    is_zero = abs_last == 0
-    alive = alive & ~is_zero
-    safe_abs = torch.where(is_zero, torch.ones_like(abs_last), abs_last)
-    safe_last = torch.where(is_zero, one_phase, last)
-    phase = phase * (safe_last / safe_abs)
-    log_abs = log_abs + torch.where(is_zero, zero_log, safe_abs.log())
+    super_index = torch.arange(0, dimension, 2, device=device)
+    pivots = working[:, super_index, super_index + 1]  # (batch, m / 2), the last one included
+    magnitudes = pivots.abs()
+    alive = (magnitudes != 0).all(dim=1)
+    log_abs = magnitudes.log().sum(dim=1)
+    phase = (pivots / magnitudes).prod(dim=1)  # unit-modulus factors (+-1 for real inputs)
+    if offsets:
+        swaps = (torch.stack(offsets, dim=1) != 0).sum(dim=1)  # (batch,), each swap flips the sign
+        phase = (1 - 2 * (swaps % 2)) * phase
 
     phase = torch.where(alive, phase, torch.zeros_like(phase))
     log_abs = torch.where(alive, log_abs, torch.full_like(log_abs, -torch.inf))
