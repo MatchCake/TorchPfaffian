@@ -249,3 +249,11 @@ class TestPfaffianUpdater:
                 on_cuda.accept(update.cuda()).cpu(), on_cpu.accept(update), atol=ATOL_SCALAR_COMPARISON, rtol=0
             )
         torch.testing.assert_close(on_cuda.inverse.cpu(), on_cpu.inverse, atol=ATOL_MATRIX_COMPARISON, rtol=0)
+
+    def test_row_replacement_with_one_index_for_the_batch(self):
+        matrix = self._skew()
+        updater = PfaffianUpdater(matrix, max_delay=2)
+        change = 0.3 * self._updates(1)[0][..., 0]  # (batch, n), one index broadcast over the batch
+        ratio = updater.ratio_replace(4, change)
+        expected = updater.ratio_replace(torch.full((BATCH,), 4), change)
+        torch.testing.assert_close(ratio, expected, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)

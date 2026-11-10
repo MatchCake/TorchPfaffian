@@ -2,7 +2,7 @@ use half::f16;
 use num_complex::Complex;
 use num_traits::{One, Zero};
 use numpy::ndarray::{Array1, Array2, Array3, Axis};
-use numpy::{Complex32, Complex64, IntoPyArray, PyArray1, PyArray3, PyReadonlyArray3};
+use numpy::{Complex32, Complex64, IntoPyArray, PyArray1, PyArray3, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use std::ops::{Add, Div, Mul, Neg, Sub};
@@ -675,6 +675,552 @@ fn flagged_inverse_c64<'py>(
     flagged_inverse_batch(py, matrix)
 }
 
+/// Arithmetic of the low-rank kernels, shared by the four precisions.
+trait LowRankScalar:
+    Copy
+    + Zero
+    + One
+    + Magnitude
+    + Neg<Output = Self>
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + Send
+    + Sync
+{
+    fn from_f64(value: f64) -> Self;
+}
+
+impl LowRankScalar for f32 {
+    fn from_f64(value: f64) -> f32 {
+        value as f32
+    }
+}
+
+impl LowRankScalar for f64 {
+    fn from_f64(value: f64) -> f64 {
+        value
+    }
+}
+
+impl LowRankScalar for Complex<f32> {
+    fn from_f64(value: f64) -> Complex<f32> {
+        Complex::new(value as f32, 0.0)
+    }
+}
+
+impl LowRankScalar for Complex<f64> {
+    fn from_f64(value: f64) -> Complex<f64> {
+        Complex::new(value, 0.0)
+    }
+}
+
+/// Lanes of [`dot`]: independent partial sums the compiler can keep in one SIMD register.
+const DOT_LANES: usize = 8;
+
+/// ``sum_i a[i] b[i]`` with [`DOT_LANES`] independent partial sums, so the loop vectorizes without reordering
+/// any one sum (a single accumulator serializes on the latency of the additions).
+#[inline(always)]
+fn dot<T: LowRankScalar>(left: &[T], right: &[T]) -> T {
+    let length = left.len().min(right.len());
+    let chunks = length / DOT_LANES;
+    let mut lanes = [T::zero(); DOT_LANES];
+    for chunk in 0..chunks {
+        let start = chunk * DOT_LANES;
+        let (left_chunk, right_chunk) = (&left[start..start + DOT_LANES], &right[start..start + DOT_LANES]);
+        for lane in 0..DOT_LANES {
+            lanes[lane] = lanes[lane] + left_chunk[lane] * right_chunk[lane];
+        }
+    }
+    let mut sum = T::zero();
+    for lane in lanes {
+        sum = sum + lane;
+    }
+    for index in chunks * DOT_LANES..length {
+        sum = sum + left[index] * right[index];
+    }
+    sum
+}
+
+/// The columns of a row-major ``(n, width)`` matrix, as ``width`` contiguous rows of length ``n``.
+#[inline(always)]
+fn columns<T: LowRankScalar>(vectors: &[T], size: usize, width: usize) -> Vec<T> {
+    let mut result = vec![T::zero(); width * size];
+    for row in 0..size {
+        for column in 0..width {
+            result[column * size + row] = vectors[row * width + column];
+        }
+    }
+    result
+}
+
+/// Square matrix stored row-major, or column-major (``transposed``: the buffer holds its transpose row-major).
+#[derive(Clone, Copy)]
+struct Matrix<'a, T> {
+    data: &'a [T],
+    size: usize,
+    transposed: bool,
+}
+
+impl<T: LowRankScalar> Matrix<'_, T> {
+    /// Row ``index`` as an owned vector.
+    #[inline(always)]
+    fn row(&self, index: usize) -> Vec<T> {
+        let size = self.size;
+        if self.transposed {
+            (0..size).map(|column| self.data[column * size + index]).collect()
+        } else {
+            self.data[index * size..(index + 1) * size].to_vec()
+        }
+    }
+
+    /// ``vectors^T M`` for ``vectors`` of shape ``(n, width)`` row-major, as ``width`` rows of length ``n``.
+    #[inline(always)]
+    fn left_product(&self, vectors: &[T], width: usize) -> Vec<T> {
+        let size = self.size;
+        let mut rows = vec![T::zero(); width * size];
+        if self.transposed {
+            // (v^T M)[c][j] = sum_i v[i][c] M[i][j], and M[i][j] is data[j][i]: a dot product per row of data.
+            let vector_rows = columns(vectors, size, width);
+            for column in 0..size {
+                let data_row = &self.data[column * size..(column + 1) * size];
+                for vector in 0..width {
+                    rows[vector * size + column] = dot(&vector_rows[vector * size..(vector + 1) * size], data_row);
+                }
+            }
+        } else {
+            for inner in 0..size {
+                let data_row = &self.data[inner * size..(inner + 1) * size];
+                for vector in 0..width {
+                    let weight = vectors[inner * width + vector];
+                    let row = &mut rows[vector * size..(vector + 1) * size];
+                    for index in 0..size {
+                        row[index] = row[index] + weight * data_row[index];
+                    }
+                }
+            }
+        }
+        rows
+    }
+}
+
+/// ``R = J + rows u`` (``2k x 2k``) for ``J = [[0, I_k], [-I_k, 0]]``, made exactly skew-symmetric from its upper
+/// triangle when ``skew`` (as ``LowRankPfaffian._skew``), else left as computed.
+#[inline(always)]
+fn r_matrix<T: LowRankScalar>(rows: &[T], update: &[T], size: usize, width: usize, skew: bool) -> Vec<T> {
+    let half = width / 2;
+    let update_columns = columns(update, size, width);
+    let mut matrix = vec![T::zero(); width * width];
+    for row in 0..width {
+        for column in 0..width {
+            matrix[row * width + column] =
+                dot(&rows[row * size..(row + 1) * size], &update_columns[column * size..(column + 1) * size]);
+        }
+    }
+    if skew {
+        let half_value = T::from_f64(0.5);
+        for row in 0..width {
+            for column in (row + 1)..width {
+                let value = (matrix[row * width + column] - matrix[column * width + row]) * half_value;
+                matrix[row * width + column] = value;
+                matrix[column * width + row] = -value;
+            }
+            matrix[row * width + row] = T::zero();
+        }
+    }
+    for index in 0..half {
+        matrix[index * width + half + index] = matrix[index * width + half + index] + T::one();
+        matrix[(half + index) * width + index] = matrix[(half + index) * width + index] - T::one();
+    }
+    matrix
+}
+
+/// ``Pf(R) / Pf(J)`` of an ``R`` that is skew-symmetric up to round-off, from its upper triangle.
+#[inline(always)]
+fn r_ratio<T: LowRankScalar>(matrix: &[T], width: usize) -> T {
+    let mut skew = matrix.to_vec();
+    for row in 0..width {
+        skew[row * width + row] = T::zero();
+        for column in (row + 1)..width {
+            skew[column * width + row] = -matrix[row * width + column];
+        }
+    }
+    let half = width / 2;
+    let ratio = pfaffian_from_flat(skew, width);
+    if (half * (half.saturating_sub(1)) / 2) % 2 == 1 {
+        -ratio
+    } else {
+        ratio
+    }
+}
+
+/// ``R^{-1} rows`` (``2k x n``) by Gaussian elimination with partial pivoting on ``R`` (``2k x 2k``).
+#[inline(always)]
+fn solve_small<T: LowRankScalar>(matrix: &[T], rows: &[T], width: usize, size: usize) -> Vec<T> {
+    let mut factors = matrix.to_vec();
+    let mut solution = rows.to_vec();
+    for step in 0..width {
+        let mut pivot_row = step;
+        let mut best = factors[step * width + step].magnitude();
+        for row in (step + 1)..width {
+            let candidate = factors[row * width + step].magnitude();
+            if candidate > best {
+                best = candidate;
+                pivot_row = row;
+            }
+        }
+        if pivot_row != step {
+            for column in 0..width {
+                factors.swap(step * width + column, pivot_row * width + column);
+            }
+            for column in 0..size {
+                solution.swap(step * size + column, pivot_row * size + column);
+            }
+        }
+        let pivot = factors[step * width + step];
+        for row in (step + 1)..width {
+            let factor = factors[row * width + step] / pivot;
+            for column in step..width {
+                factors[row * width + column] = factors[row * width + column] - factor * factors[step * width + column];
+            }
+            for column in 0..size {
+                solution[row * size + column] = solution[row * size + column] - factor * solution[step * size + column];
+            }
+        }
+    }
+    for step in (0..width).rev() {
+        let pivot = factors[step * width + step];
+        for column in 0..size {
+            let mut value = solution[step * size + column];
+            for inner in (step + 1)..width {
+                value = value - factors[step * width + inner] * solution[inner * size + column];
+            }
+            solution[step * size + column] = value / pivot;
+        }
+    }
+    solution
+}
+
+/// Adds ``left^T right`` (``left`` and ``right`` of shape ``(p, n)``) to ``output``, which holds ``A^{-1}`` in the
+/// layout of ``inverse``: a transposed (column-major) one gets ``right^T left``, the transpose, so the buffer is
+/// read and written in order and the caller keeps its layout. One pass over ``output``, row by row.
+#[inline(always)]
+fn add_outer<T: LowRankScalar>(inverse: Matrix<'_, T>, left: &[T], right: &[T], count: usize, output: &mut [T]) {
+    let size = inverse.size;
+    let (left, right) = if inverse.transposed { (right, left) } else { (left, right) };
+    for row in 0..size {
+        let target = &mut output[row * size..(row + 1) * size];
+        for term in 0..count {
+            let weight = left[term * size + row];
+            let right_row = &right[term * size..(term + 1) * size];
+            for column in 0..size {
+                target[column] = target[column] + weight * right_row[column];
+            }
+        }
+    }
+}
+
+/// Ratio ``Pf(A - u J u^T) / Pf(A)`` of one matrix, as ``LowRankPfaffian._ratio_core``.
+#[inline(always)]
+fn low_rank_ratio_one<T: LowRankScalar>(inverse: Matrix<'_, T>, update: &[T], width: usize) -> T {
+    let size = inverse.size;
+    if width == 2 {
+        // R_01 = 1 + u_0^T A^{-1} u_1: only the first row of u^T A^{-1} is needed.
+        let first = inverse.left_product(&columns(update, size, width)[..size], 1);
+        let second: Vec<T> = (0..size).map(|index| update[index * width + 1]).collect();
+        return T::one() + dot(&first, &second);
+    }
+    let rows = inverse.left_product(update, width);
+    r_ratio(&r_matrix(&rows, update, size, width, false), width)
+}
+
+/// Ratio and updated inverse of one matrix, as ``LowRankPfaffian._ratio_and_inverse_core``.
+#[inline(always)]
+fn low_rank_ratio_and_inverse_one<T: LowRankScalar>(
+    inverse: Matrix<'_, T>,
+    update: &[T],
+    width: usize,
+    output: &mut [T],
+) -> T {
+    let size = inverse.size;
+    let rows = inverse.left_product(update, width);
+    if width == 2 {
+        let second: Vec<T> = (0..size).map(|index| update[index * width + 1]).collect();
+        let ratio = T::one() + dot(&rows[..size], &second);
+        // rows^T R^{-1} rows = (rows_1^T rows_0 - rows_0^T rows_1) / r
+        let left: Vec<T> = rows[size..2 * size].iter().chain(rows[..size].iter()).copied().collect();
+        let right: Vec<T> = rows[..size]
+            .iter()
+            .map(|value| *value / ratio)
+            .chain(rows[size..2 * size].iter().map(|value| -*value / ratio))
+            .collect();
+        add_outer(inverse, &left, &right, 2, output);
+        return ratio;
+    }
+    let matrix = r_matrix(&rows, update, size, width, true);
+    let ratio = r_ratio(&matrix, width);
+    let solved = solve_small(&matrix, &rows, width, size);
+    add_outer(inverse, &rows, &solved, width, output);
+    ratio
+}
+
+/// ``column = A^{-1} e_i`` (as minus row ``i``, as the PyTorch core) and the ratio ``1 + c^T A^{-1} e_i``.
+#[inline(always)]
+fn replace_column<T: LowRankScalar>(inverse: Matrix<'_, T>, index: usize, change: &[T]) -> (Vec<T>, T) {
+    let column: Vec<T> = inverse.row(index).into_iter().map(|value| -value).collect();
+    let ratio = T::one() + dot(change, &column);
+    (column, ratio)
+}
+
+/// Ratio and updated inverse of a row and column replacement, as ``_ratio_replace_and_inverse_core``.
+#[inline(always)]
+fn replace_ratio_and_inverse_one<T: LowRankScalar>(
+    inverse: Matrix<'_, T>,
+    index: usize,
+    change: &[T],
+    output: &mut [T],
+) -> T {
+    let (column, ratio) = replace_column(inverse, index, change);
+    // row = c^T A^{-1}; A'^{-1} = A^{-1} + (col (-row) + row^T col^T) / r
+    let row = inverse.left_product(change, 1);
+    let left: Vec<T> = column.iter().chain(row.iter()).copied().collect();
+    let right: Vec<T> =
+        row.iter().map(|value| -*value / ratio).chain(column.iter().map(|value| *value / ratio)).collect();
+    add_outer(inverse, &left, &right, 2, output);
+    ratio
+}
+
+/// Runs ``work`` compiled for AVX2 and FMA when the CPU has them (checked once per call at run time): the wheels
+/// target baseline x86-64 (SSE2), and the always-inlined kernels above vectorize twice as wide with AVX2.
+#[inline(always)]
+fn vectorized<R, F: FnOnce() -> R>(work: F) -> R {
+    #[cfg(target_arch = "x86_64")]
+    {
+        #[target_feature(enable = "avx2,fma")]
+        unsafe fn with_avx2<R, F: FnOnce() -> R>(work: F) -> R {
+            work()
+        }
+        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
+            // SAFETY: the CPU supports the enabled features, checked just above.
+            return unsafe { with_avx2(work) };
+        }
+    }
+    work()
+}
+
+/// Runs ``work`` on every chunk of ``output`` (one per batch element) with its index, in parallel above a
+/// threshold, and returns the results.
+fn batch_map_into<T: Send, R: Send, F: Fn(usize, &mut [T]) -> R + Sync + Send>(
+    output: &mut [T],
+    chunk: usize,
+    work: F,
+) -> Vec<R> {
+    if output.len() / chunk.max(1) >= PARALLEL_BATCH_THRESHOLD {
+        output.par_chunks_mut(chunk).enumerate().map(|(item, part)| work(item, part)).collect()
+    } else {
+        output.chunks_mut(chunk).enumerate().map(|(item, part)| work(item, part)).collect()
+    }
+}
+
+/// Runs ``work`` on every index of a batch, in parallel above a threshold.
+fn batch_map<R: Send, F: Fn(usize) -> R + Sync + Send>(batch: usize, work: F) -> Vec<R> {
+    if batch >= PARALLEL_BATCH_THRESHOLD {
+        (0..batch).into_par_iter().map(work).collect()
+    } else {
+        (0..batch).map(work).collect()
+    }
+}
+
+/// Batched ratios of low-rank updates: ``inverse (b, n, n)`` (its transpose when ``transposed``),
+/// ``update (b, n, 2k)``.
+fn low_rank_ratio_batch<'py, T: LowRankScalar + numpy::Element>(
+    py: Python<'py>,
+    inverse: PyReadonlyArray3<'py, T>,
+    transposed: bool,
+    update: PyReadonlyArray3<'py, T>,
+) -> Bound<'py, PyArray1<T>> {
+    let (inverse, update) = (inverse.as_array(), update.as_array());
+    let (batch, size, width) = (update.shape()[0], update.shape()[1], update.shape()[2]);
+    let inverse = inverse.as_slice().expect("C-contiguous inverse");
+    let update = update.as_slice().expect("C-contiguous update");
+    let ratios = py.allow_threads(|| {
+        batch_map(batch, |item| {
+            vectorized(|| {
+                low_rank_ratio_one(
+                    Matrix { data: &inverse[item * size * size..(item + 1) * size * size], size, transposed },
+                    &update[item * size * width..(item + 1) * size * width],
+                    width,
+                )
+            })
+        })
+    });
+    Array1::from(ratios).into_pyarray(py)
+}
+
+/// Batched ratios and updated inverses of low-rank updates (see [`low_rank_ratio_batch`]).
+fn low_rank_ratio_and_inverse_batch<'py, T: LowRankScalar + numpy::Element>(
+    py: Python<'py>,
+    inverse: PyReadonlyArray3<'py, T>,
+    transposed: bool,
+    update: PyReadonlyArray3<'py, T>,
+) -> (Bound<'py, PyArray1<T>>, Bound<'py, PyArray3<T>>) {
+    let (inverse, update) = (inverse.as_array(), update.as_array());
+    let (batch, size, width) = (update.shape()[0], update.shape()[1], update.shape()[2]);
+    let inverse = inverse.as_slice().expect("C-contiguous inverse");
+    let update = update.as_slice().expect("C-contiguous update");
+    let mut output = inverse.to_vec(); // the updates are added in place: one copy of the batch, no zero-fill
+    let ratios = py.allow_threads(|| {
+        batch_map_into(&mut output, size * size, |item, chunk| {
+            vectorized(|| {
+                low_rank_ratio_and_inverse_one(
+                    Matrix { data: &inverse[item * size * size..(item + 1) * size * size], size, transposed },
+                    &update[item * size * width..(item + 1) * size * width],
+                    width,
+                    chunk,
+                )
+            })
+        })
+    });
+    ratios_and_inverses(py, ratios, output, batch, size)
+}
+
+/// The ratios and the updated inverses (in the input's layout) as numpy arrays, without copying the inverses.
+fn ratios_and_inverses<'py, T: LowRankScalar + numpy::Element>(
+    py: Python<'py>,
+    ratios: Vec<T>,
+    inverses: Vec<T>,
+    batch: usize,
+    size: usize,
+) -> (Bound<'py, PyArray1<T>>, Bound<'py, PyArray3<T>>) {
+    let inverses = Array3::from_shape_vec((batch, size, size), inverses).expect("shape matches");
+    (Array1::from(ratios).into_pyarray(py), inverses.into_pyarray(py))
+}
+
+/// Batched ratios of row and column replacements: ``inverse (b, n, n)``, ``index (b,)``, ``change (b, n)``.
+fn replace_ratio_batch<'py, T: LowRankScalar + numpy::Element>(
+    py: Python<'py>,
+    inverse: PyReadonlyArray3<'py, T>,
+    transposed: bool,
+    index: PyReadonlyArray1<'py, i64>,
+    change: PyReadonlyArray2<'py, T>,
+) -> Bound<'py, PyArray1<T>> {
+    let (inverse, index, change) = (inverse.as_array(), index.as_array(), change.as_array());
+    let (batch, size) = (change.shape()[0], change.shape()[1]);
+    let inverse = inverse.as_slice().expect("C-contiguous inverse");
+    let index = index.as_slice().expect("contiguous index");
+    let change = change.as_slice().expect("C-contiguous change");
+    let ratios = py.allow_threads(|| {
+        batch_map(batch, |item| {
+            vectorized(|| {
+                replace_column(
+                    Matrix { data: &inverse[item * size * size..(item + 1) * size * size], size, transposed },
+                    index[item] as usize,
+                    &change[item * size..(item + 1) * size],
+                )
+                .1
+            })
+        })
+    });
+    Array1::from(ratios).into_pyarray(py)
+}
+
+/// Batched ratios and updated inverses of row and column replacements (see [`replace_ratio_batch`]).
+fn replace_ratio_and_inverse_batch<'py, T: LowRankScalar + numpy::Element>(
+    py: Python<'py>,
+    inverse: PyReadonlyArray3<'py, T>,
+    transposed: bool,
+    index: PyReadonlyArray1<'py, i64>,
+    change: PyReadonlyArray2<'py, T>,
+) -> (Bound<'py, PyArray1<T>>, Bound<'py, PyArray3<T>>) {
+    let (inverse, index, change) = (inverse.as_array(), index.as_array(), change.as_array());
+    let (batch, size) = (change.shape()[0], change.shape()[1]);
+    let inverse = inverse.as_slice().expect("C-contiguous inverse");
+    let index = index.as_slice().expect("contiguous index");
+    let change = change.as_slice().expect("C-contiguous change");
+    let mut output = inverse.to_vec(); // the updates are added in place: one copy of the batch, no zero-fill
+    let ratios = py.allow_threads(|| {
+        batch_map_into(&mut output, size * size, |item, chunk| {
+            vectorized(|| {
+                replace_ratio_and_inverse_one(
+                    Matrix { data: &inverse[item * size * size..(item + 1) * size * size], size, transposed },
+                    index[item] as usize,
+                    &change[item * size..(item + 1) * size],
+                    chunk,
+                )
+            })
+        })
+    });
+    ratios_and_inverses(py, ratios, output, batch, size)
+}
+
+macro_rules! low_rank_functions {
+    ($scalar:ty, $ratio:ident, $ratio_and_inverse:ident, $replace:ident, $replace_and_inverse:ident) => {
+        /// Ratios ``Pf(A - u J u^T) / Pf(A)`` of a batch (``LowRankPfaffian.ratio``).
+        #[pyfunction]
+        fn $ratio<'py>(
+            py: Python<'py>,
+            inverse: PyReadonlyArray3<'py, $scalar>,
+            transposed: bool,
+            update: PyReadonlyArray3<'py, $scalar>,
+        ) -> Bound<'py, PyArray1<$scalar>> {
+            low_rank_ratio_batch(py, inverse, transposed, update)
+        }
+
+        /// Ratios and updated inverses of a batch (``LowRankPfaffian.ratio_and_inverse``).
+        #[pyfunction]
+        fn $ratio_and_inverse<'py>(
+            py: Python<'py>,
+            inverse: PyReadonlyArray3<'py, $scalar>,
+            transposed: bool,
+            update: PyReadonlyArray3<'py, $scalar>,
+        ) -> (Bound<'py, PyArray1<$scalar>>, Bound<'py, PyArray3<$scalar>>) {
+            low_rank_ratio_and_inverse_batch(py, inverse, transposed, update)
+        }
+
+        /// Ratios of row and column replacements of a batch (``LowRankPfaffian.ratio_replace``).
+        #[pyfunction]
+        fn $replace<'py>(
+            py: Python<'py>,
+            inverse: PyReadonlyArray3<'py, $scalar>,
+            transposed: bool,
+            index: PyReadonlyArray1<'py, i64>,
+            change: PyReadonlyArray2<'py, $scalar>,
+        ) -> Bound<'py, PyArray1<$scalar>> {
+            replace_ratio_batch(py, inverse, transposed, index, change)
+        }
+
+        /// Ratios and updated inverses of row and column replacements (``ratio_replace_and_inverse``).
+        #[pyfunction]
+        fn $replace_and_inverse<'py>(
+            py: Python<'py>,
+            inverse: PyReadonlyArray3<'py, $scalar>,
+            transposed: bool,
+            index: PyReadonlyArray1<'py, i64>,
+            change: PyReadonlyArray2<'py, $scalar>,
+        ) -> (Bound<'py, PyArray1<$scalar>>, Bound<'py, PyArray3<$scalar>>) {
+            replace_ratio_and_inverse_batch(py, inverse, transposed, index, change)
+        }
+    };
+}
+
+low_rank_functions!(f64, low_rank_ratio_f64, low_rank_ratio_and_inverse_f64, replace_ratio_f64, replace_ratio_and_inverse_f64);
+low_rank_functions!(f32, low_rank_ratio_f32, low_rank_ratio_and_inverse_f32, replace_ratio_f32, replace_ratio_and_inverse_f32);
+low_rank_functions!(
+    Complex64,
+    low_rank_ratio_c128,
+    low_rank_ratio_and_inverse_c128,
+    replace_ratio_c128,
+    replace_ratio_and_inverse_c128
+);
+low_rank_functions!(
+    Complex32,
+    low_rank_ratio_c64,
+    low_rank_ratio_and_inverse_c64,
+    replace_ratio_c64,
+    replace_ratio_and_inverse_c64
+);
+
 #[pymodule]
 fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(signed_pfaffian_f64, module)?)?;
@@ -690,6 +1236,22 @@ fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(flagged_inverse_f32, module)?)?;
     module.add_function(wrap_pyfunction!(flagged_inverse_c128, module)?)?;
     module.add_function(wrap_pyfunction!(flagged_inverse_c64, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_f64, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_and_inverse_f64, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_f64, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_and_inverse_f64, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_and_inverse_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_and_inverse_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_c128, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_and_inverse_c128, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_c128, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_and_inverse_c128, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_c64, module)?)?;
+    module.add_function(wrap_pyfunction!(low_rank_ratio_and_inverse_c64, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_c64, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_ratio_and_inverse_c64, module)?)?;
     Ok(())
 }
 

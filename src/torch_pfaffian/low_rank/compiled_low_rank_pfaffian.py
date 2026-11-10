@@ -42,6 +42,9 @@ class CompiledLowRankPfaffian(LowRankPfaffian):
 
     @classmethod
     def _call(cls, core: Callable[..., T], *tensors: torch.Tensor) -> T:
+        native = LowRankPfaffian._native_call(core, tensors)
+        if native is not None:  # CPU without a graph: the Rust kernel beats a compiled call's fixed cost
+            return native
         if core in CompiledLowRankPfaffian._EAGER_CORES:
             return core(*tensors)
         try:

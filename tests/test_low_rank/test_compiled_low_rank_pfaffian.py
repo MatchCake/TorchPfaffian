@@ -39,6 +39,11 @@ class TestCompiledLowRankPfaffian:
         generator = torch.Generator().manual_seed(seed)
         return torch.randn(*shape, generator=generator, dtype=torch.float64)
 
+    @pytest.fixture(autouse=True)
+    def _without_native_kernels(self, monkeypatch):
+        # CPU calls without a graph take the Rust kernels before the compiler; these tests are about the compiler.
+        monkeypatch.setattr(LowRankPfaffian, "_native_kernels", staticmethod(lambda: {}))
+
     @pytest.fixture
     def require_compile(self):
         if not self._compile_works():  # pragma: no cover - depends on the platform

@@ -306,6 +306,8 @@ class PfaffianUpdater:
                 f"{self._inverse.device}; got {change.dtype} on {change.device}."
             )
         index = LowRankPfaffian.as_index(index, change.device)
+        if index.shape == change.shape[:-1]:  # broadcast_shapes costs about 10 us
+            return index, change
         batch_shape = torch.broadcast_shapes(change.shape[:-1], index.shape)
         if change.shape[:-1] != batch_shape:
             change = change.expand(*batch_shape, dimension)

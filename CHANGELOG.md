@@ -31,6 +31,10 @@ changes the package's behaviour, API, documentation or packaging.
 
 ### Changed
 
+- `LowRankPfaffian.ratio`, `ratio_and_inverse`, `ratio_replace` and `ratio_replace_and_inverse` run in one
+  Rust call on CPU without a graph to build: on one thread and one `n = 32` matrix, a rank-2 ratio and
+  inverse take 18 us instead of 77 us and a row replacement with its inverse 23 us instead of 119 us,
+  within 2x of lrux for every single-matrix case. Wide updates of large batches keep the PyTorch path.
 - Signed `pfaffian()` on CUDA is up to 67x faster (#34). Inputs with `batch * m^2 <= 2^20`
   (`AUTO_HOST_MAX_BATCH_SQUARE`) are computed by the Rust kernel on the host, with the backward on the device,
   since the elimination on the device is bound by its kernel launches there: `m = 32` takes 0.18 ms instead of
