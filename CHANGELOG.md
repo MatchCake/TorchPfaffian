@@ -31,6 +31,42 @@ changes the package's behaviour, API, documentation or packaging.
 
 ### Changed
 
+- `LowRankPfaffian.ratio`, `ratio_and_inverse`, `ratio_replace` and `ratio_replace_and_inverse` run in one
+  Rust call on CPU without a graph to build: on one thread and one `n = 32` matrix, a rank-2 ratio and
+  inverse take 18 us instead of 77 us and a row replacement with its inverse 23 us instead of 119 us,
+  within 2x of lrux for every single-matrix case. Wide updates of large batches keep the PyTorch path.
+- `PfaffianUpdater` applies accepted moves at once with those kernels when nothing is delayed and the
+  inverse has at most 2^18 entries (CPU, no graph), which beats delaying there: 16 row moves of one `n = 32`
+  matrix take 25 us per move instead of 157 us (lrux's delayed updates: 85 us), `n = 512` 230 us instead of
+  363 us. Large batches keep the delayed updates.
+- Signed `pfaffian()` on CUDA is up to 67x faster (#34). Inputs with `batch * m^2 <= 2^20`
+  (`AUTO_HOST_MAX_BATCH_SQUARE`) are computed by the Rust kernel on the host, with the backward on the device,
+  since the elimination on the device is bound by its kernel launches there: `m = 32` takes 0.18 ms instead of
+  6.7 ms, `m = 128` 0.40 ms instead of 27 ms on one matrix on an RTX 3070. `PfaffianParlettReid`, which larger
+  inputs still use, runs about a dozen operators per elimination step instead of about thirty (one gather and
+  one scatter per swap, two in-place multiply-adds, no zeroing), which makes it 1.1 to 1.7x faster on CUDA
+  (`m = 256` with a batch of 256: 77 ms instead of 108 ms).
+- `ParlettReidTriton`: on CUDA, with Triton installed, `PfaffianParlettReid` eliminates real `float32` and
+  `float64` batches with one Triton kernel launch (one program per matrix) instead of a dozen launches per
+  step, up to `m = 1024` (and below 2^22 entries in `float64`, where the loop is as fast). On an RTX 3070,
+  `float64` batches of 256 take 0.60 ms instead of 4.0 ms at `m = 32` and 2.9 ms instead of 8.0 ms at
+  `m = 64`; `float32` is 2 to 35x faster. Complex inputs keep the PyTorch loop (#34).
+- `slog_pfaffian()` uses the same Triton kernel on CUDA, still without host synchronization: one `32 x 32`
+  matrix takes 0.33 ms instead of 3.95 ms, a batch of 256 0.64 ms instead of 4.0 ms (#34).
+- The backward of small CUDA inputs routed to the host (at most 2^13 entries,
+  `RustPfaffianParlettReid.HOST_BACKWARD_MAX_NUMEL`) runs on the host too, about 30% faster for a single
+  `m = 32` or `m = 64` matrix; a double backward stays on the device (#34).
+- `slog_pfaffian()`'s elimination runs about a dozen operators per step, with the same in-place swaps and
+  updates as `PfaffianParlettReid`, which makes it 1.4 to 2x faster on CUDA and keeps it free of host
+  synchronization (#34).
+- A Rust kernel (`flagged_inverse_*`) computes the inverse and singularity flags of the backward on CPU (and
+  for small CUDA inputs, on the host), with the adjugate and the gradient formed in NumPy: the signed
+  gradient of 256 matrices with `m = 32` takes 19 us per matrix instead of 62 us, and with `m = 64` 93 us
+  instead of 296 us. It is used up to `m = 40`, and up to `m = 96` for batches of 8 or more, where it beats
+  LAPACK.
+- `pfaffian()` calls the Rust strategy's forward directly when no graph is built, skipping autograd's
+  `Function.apply`, and tests the finiteness of CPU results with NumPy: a single `8 x 8` Pfaffian takes
+  18 us instead of 55 us.
 - `benchmarks/pfapack_comparison.py` is renamed `benchmarks/library_comparison.py`. It also times
   [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
   [lrux](https://github.com/ChenAo-Phys/lrux), runs them and TorchPfaffian on the GPU when CUDA is

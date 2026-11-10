@@ -77,7 +77,8 @@ pfapack:
 - [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian), a differentiable PyTorch
   Pfaffian with a Triton kernel on CUDA;
 - [lrux](https://github.com/ChenAo-Phys/lrux), a JAX library of low-rank Pfaffian updates, whose full Pfaffian
-  (from its dependency fermix) is timed jitted, in double precision.
+  (from its dependency [fermix](https://github.com/ChenAo-Phys/fermix), batched determinants and Pfaffians
+  with JAX/Pallas kernels on GPU) is timed jitted, in double precision.
 
 It uses random matrices from the `general` family of `cases.py`, in float64 and complex128. The PyTorch and JAX
 libraries run on CPU and, when CUDA is available, on the GPU too, so the table shows whether the GPU beats

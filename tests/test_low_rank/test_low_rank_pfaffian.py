@@ -42,6 +42,23 @@ class TestLowRankPfaffian:
         return entries.to(dtype)
 
     @staticmethod
+    def _per_matrix(core, inverse: torch.Tensor, *arguments: torch.Tensor):
+        # The core on each matrix of the batch on its own: batched LAPACK calls (the solve of R) are not always
+        # correct with some MKL builds (issue #23), unbatched ones are.
+        size = inverse.shape[-1]
+        batch_shape = inverse.shape[:-2]
+        flat = [inverse.reshape(-1, size, size)]
+        for argument in arguments:
+            flat.append(argument.reshape(-1, *argument.shape[len(batch_shape) :]))
+        results = [core(*(tensor[item] for tensor in flat)) for item in range(flat[0].shape[0])]
+        if isinstance(results[0], tuple):
+            return tuple(
+                torch.stack([result[part] for result in results]).reshape(batch_shape + results[0][part].shape)
+                for part in range(len(results[0]))
+            )
+        return torch.stack(results).reshape(batch_shape + results[0].shape)
+
+    @staticmethod
     def _apply_update(matrix: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
         identity = LowRankPfaffian.skew_identity(update.shape[-1] // 2, dtype=update.dtype)
         return matrix - update @ identity @ update.mT
@@ -438,4 +455,90 @@ class TestLowRankPfaffian:
             torch.linalg.inv(0.5 * (r_matrix - r_matrix.mT)),
             atol=ATOL_MATRIX_COMPARISON,
             rtol=RTOL_MATRIX_COMPARISON,
+        )
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.complex64, torch.complex128])
+    @pytest.mark.parametrize("width", [2, 4, 12])  # 12: R beyond the unrolled small kernel
+    @pytest.mark.parametrize("batch", [(), (3,), (9,), (2, 2)])  # unbatched, serial, parallel, two dimensions
+    def test_native_kernels_match_the_pytorch_cores(self, dtype, width, batch):
+        pytest.importorskip("torch_pfaffian._rust")
+        size = 24  # well beyond the update width, so that R stays well conditioned in single precision
+        matrix = self._skew(*batch, size, size, dtype=dtype)
+        # The methods take a skew-symmetric A^{-1}; torch.linalg.inv's is skew only up to round-off, which in single
+        # precision lets the two readings of R (upper or lower triangle) differ.
+        inverse = torch.linalg.inv(matrix)
+        column_major = ((inverse - inverse.mT) / 2).mT.contiguous().mT  # as torch.linalg.inv lays it out
+        row_major = column_major.contiguous()
+        update = self._random(*batch, size, width, dtype=dtype)
+        index = torch.arange(len(torch.zeros(batch).flatten())).reshape(batch) % size
+        change = self._random(*batch, size, dtype=dtype, seed=TEST_SEED + 5)
+        single = dtype in (torch.float32, torch.complex64)
+        calls = [
+            (LowRankPfaffian._ratio_core, (update,)),
+            (LowRankPfaffian._ratio_and_inverse_core, (update,)),
+            (LowRankPfaffian._ratio_replace_core, (index, change)),
+            (LowRankPfaffian._ratio_replace_and_inverse_core, (index, change)),
+        ]
+        for core, arguments in calls:
+            for inverse in (row_major, column_major):
+                native = LowRankPfaffian._native_call(core, (inverse, *arguments))
+                assert native is not None
+                expected = self._per_matrix(core, inverse, *arguments)
+                if not single:
+                    torch.testing.assert_close(
+                        native, expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+                    )
+                    continue
+                # In single precision both round differently: the native error against the double-precision
+                # result must be within a small factor of the PyTorch core's.
+                double = torch.complex128 if dtype.is_complex else torch.float64
+                upcast = [
+                    tensor.to(double) if tensor.is_floating_point() or tensor.is_complex() else tensor
+                    for tensor in (inverse, *arguments)
+                ]
+                reference = self._per_matrix(core, *upcast)
+                for native_part, expected_part, reference_part in zip(
+                    *(value if isinstance(value, tuple) else (value,) for value in (native, expected, reference))
+                ):
+                    native_error = (native_part.to(double) - reference_part).abs().max()
+                    core_error = (expected_part.to(double) - reference_part).abs().max()
+                    scale = reference_part.abs().max()
+                    assert native_error <= 10 * core_error + ATOL_SINGLE_PRECISION_COMPARISON * scale
+
+    def test_native_kernels_apply_only_without_a_graph_broadcast_or_odd_layout(self):
+        pytest.importorskip("torch_pfaffian._rust")
+        inverse = torch.linalg.inv(self._skew(3, 8, 8))
+        update = self._random(3, 8, 2)
+        core = LowRankPfaffian._ratio_core
+        assert LowRankPfaffian._native_call(core, (inverse, update)) is not None
+        assert LowRankPfaffian._native_call(LowRankPfaffian._ratio_extend_core, (inverse, update, update)) is None
+        assert LowRankPfaffian._native_call(core, (inverse.half(), update.half())) is None  # no kernel
+        assert LowRankPfaffian._native_call(core, (inverse, update.requires_grad_(True))) is None  # needs a graph
+        with torch.no_grad():
+            assert LowRankPfaffian._native_call(core, (inverse, update)) is not None  # no graph after all
+        update = update.detach()
+        assert LowRankPfaffian._native_call(core, (inverse[0], update)) is None  # broadcast batch
+        index, change = torch.tensor([1, 2, 3]), self._random(3, 8)
+        assert LowRankPfaffian._native_call(LowRankPfaffian._ratio_replace_core, (inverse, index[:1], change)) is None
+        strided = torch.linalg.inv(self._skew(3, 16, 16))[:, ::2, ::2]
+        assert LowRankPfaffian._native_call(core, (strided, update)) is None  # neither row- nor column-major
+        # Public methods with a graph still take the PyTorch cores, and their gradients.
+        inverse = inverse.requires_grad_(True)
+        ratio = LowRankPfaffian.ratio(inverse, update)
+        assert ratio.requires_grad
+
+    def test_native_kernels_leave_wide_updates_of_large_batches_and_read_conjugate_views(self):
+        pytest.importorskip("torch_pfaffian._rust")
+        inverse = torch.linalg.inv(self._skew(16, 64, 64))  # 2^16 entries
+        assert LowRankPfaffian._native_call(LowRankPfaffian._ratio_core, (inverse, self._random(16, 64, 4))) is None
+        assert LowRankPfaffian._native_call(LowRankPfaffian._ratio_core, (inverse, self._random(16, 64, 2))) is not None
+        matrix = self._skew(2, 8, 8, dtype=torch.complex128)
+        inverse = torch.linalg.inv(matrix).contiguous()
+        update = self._random(2, 8, 2, dtype=torch.complex128)
+        native = LowRankPfaffian._native_call(LowRankPfaffian._ratio_core, (inverse, update.conj()))
+        torch.testing.assert_close(
+            native,
+            LowRankPfaffian._ratio_core(inverse, update.conj().resolve_conj()),
+            atol=ATOL_SCALAR_COMPARISON,
+            rtol=RTOL_SCALAR_COMPARISON,
         )

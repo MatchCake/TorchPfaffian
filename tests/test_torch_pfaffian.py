@@ -125,6 +125,15 @@ class TestTorchPfaffian:
         full = torch.randn(8, 8, dtype=torch.float64, generator=generator)
         return full - full.transpose(-1, -2)
 
+    @staticmethod
+    def _non_cpu_matrix() -> mock.MagicMock:
+        matrix = mock.MagicMock()
+        matrix.device.type = "cuda"
+        matrix.shape = (8, 8)  # larger than AUTO_SMALL_MAX so the small-m kernel is bypassed
+        matrix.numel.return_value = 64  # below AUTO_BLOCK_DET_MIN_NUMEL, so no block-form check
+        matrix.dtype = torch.float64
+        return matrix
+
     def test_pfaffian_signed_by_default_matches_parlett_reid(self):
         matrix = self._skew_matrix()
         torch.testing.assert_close(pfaffian(matrix), PfaffianParlettReid.apply(matrix))
@@ -139,7 +148,11 @@ class TestTorchPfaffian:
         pytest.importorskip("torch_pfaffian._rust")
         with mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake:
             fake.apply.return_value = torch.zeros(())
-            pfaffian(self._large_skew_matrix(), sign=True)
+            fake.forward.return_value = torch.zeros(())
+            pfaffian(self._large_skew_matrix(), sign=True)  # no graph to build: the forward is called directly
+            fake.forward.assert_called_once()
+            fake.apply.assert_not_called()
+            pfaffian(self._large_skew_matrix().requires_grad_(True), sign=True)  # through autograd
             fake.apply.assert_called_once()
 
     def test_pfaffian_routes_sign_true_to_python_when_rust_unavailable(self):
@@ -151,22 +164,46 @@ class TestTorchPfaffian:
             pfaffian(self._large_skew_matrix(), sign=True)
             fake.apply.assert_called_once()
 
-    def test_pfaffian_sign_true_routes_to_python_on_non_cpu_device(self):
-        # The Rust kernel is CPU-only, so a non-CPU input must use the device-native PyTorch strategy.
+    @pytest.mark.parametrize(
+        ("host_max", "capturing", "on_host"),
+        [(torch_pfaffian.AUTO_HOST_MAX_BATCH_SQUARE, False, True), (63, False, False), (64, True, False)],
+    )
+    def test_pfaffian_sign_true_on_non_cpu_device_takes_the_host_only_when_small(self, host_max, capturing, on_host):
+        # Small inputs take the Rust kernel through the host (the device elimination is launch-bound); large
+        # ones, and inputs during a CUDA graph capture (which cannot copy to the host), stay on the device.
         pytest.importorskip("torch_pfaffian._rust")
-        non_cpu_matrix = mock.MagicMock()
-        non_cpu_matrix.device.type = "cuda"
-        non_cpu_matrix.shape = (8, 8)  # larger than AUTO_SMALL_MAX so the small-m kernel is bypassed
-        non_cpu_matrix.numel.return_value = 64  # below AUTO_BLOCK_DET_MIN_NUMEL, so no block-form check
-        non_cpu_matrix.dtype = torch.float64
         with (
+            mock.patch.object(torch_pfaffian, "AUTO_HOST_MAX_BATCH_SQUARE", host_max),
+            mock.patch.object(torch.cuda, "is_current_stream_capturing", return_value=capturing),
             mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust,
             mock.patch.object(torch_pfaffian, "PfaffianParlettReid") as fake_python,
         ):
+            fake_rust.apply.return_value = torch.zeros(())
             fake_python.apply.return_value = torch.zeros(())
-            pfaffian(non_cpu_matrix, sign=True)
-            fake_python.apply.assert_called_once()
-            fake_rust.apply.assert_not_called()
+            pfaffian(self._non_cpu_matrix(), sign=True)
+            assert fake_rust.apply.call_count == int(on_host)
+            assert fake_python.apply.call_count == int(not on_host)
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    def test_pfaffian_on_cuda_matches_cpu_on_both_routes(self, dtype):  # pragma: no cover - needs a GPU
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        entries = torch.randn(4, 12, 12, generator=generator, dtype=torch.float64).to(dtype)
+        matrix = (entries - entries.mT).requires_grad_(True)
+        expected = pfaffian(matrix)
+        (expected_gradient,) = torch.autograd.grad(expected.real.sum(), matrix)
+        for host_max in (torch_pfaffian.AUTO_HOST_MAX_BATCH_SQUARE, 0):  # through the host, then on the device
+            with mock.patch.object(torch_pfaffian, "AUTO_HOST_MAX_BATCH_SQUARE", host_max):
+                on_cuda = matrix.detach().cuda().requires_grad_(True)
+                result = pfaffian(on_cuda)
+                (gradient,) = torch.autograd.grad(result.real.sum(), on_cuda)
+            assert result.device.type == "cuda" and gradient.device.type == "cuda"
+            torch.testing.assert_close(
+                result.cpu(), expected.detach(), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+            )
+            torch.testing.assert_close(
+                gradient.cpu(), expected_gradient, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+            )
 
     def test_pfaffian_routes_magnitude_no_grad_to_det(self):
         with mock.patch.object(torch_pfaffian, "PfaffianDet") as fake:
@@ -272,9 +309,9 @@ class TestTorchPfaffian:
         rng = np.random.default_rng(TEST_SEED)
         matrix = torch.tensor(_rand_skew_complex(8, rng), dtype=torch.complex128)
         with mock.patch.object(torch_pfaffian, "RustPfaffianParlettReid") as fake_rust:
-            fake_rust.apply.return_value = torch.zeros((), dtype=torch.complex128)
+            fake_rust.forward.return_value = torch.zeros((), dtype=torch.complex128)
             pfaffian(matrix, sign=True)
-            fake_rust.apply.assert_called_once()
+            fake_rust.forward.assert_called_once()
 
     def test_pfaffian_sign_true_complex_emits_no_imaginary_discard_warning(self):
         rng = np.random.default_rng(TEST_SEED)

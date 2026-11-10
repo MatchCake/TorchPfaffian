@@ -1,4 +1,21 @@
+from collections.abc import Callable
+from typing import Any
+
 import torch
+
+# The Rust inverse of _flagged_inverse, per dtype; empty when the extension is not built.
+_NATIVE_INVERSE: dict[torch.dtype, Callable[[Any], tuple[Any, Any, Any]]]
+try:
+    from .. import _rust
+
+    _NATIVE_INVERSE = {
+        torch.float32: _rust.flagged_inverse_f32,
+        torch.float64: _rust.flagged_inverse_f64,
+        torch.complex64: _rust.flagged_inverse_c64,
+        torch.complex128: _rust.flagged_inverse_c128,
+    }
+except (ImportError, AttributeError):  # pragma: no cover - without the compiled extension
+    _NATIVE_INVERSE = {}
 
 
 class PfaffianStrategy(torch.autograd.Function):
@@ -28,6 +45,13 @@ class PfaffianStrategy(torch.autograd.Function):
     # Elements per chunk (k * pairs * (n - 2)^2) of the batched minor Pfaffians: bounds the memory to 4-16 MiB
     # per chunk, which also measured as fast as larger chunks (cache-friendly).
     MINOR_CHUNK_ELEMENTS = 1 << 20
+    # The Rust inverse of _flagged_inverse (unblocked LU, one thread per matrix) beats PyTorch's LAPACK path up
+    # to k = NATIVE_INVERSE_MAX_SIZE on one matrix (k = 32: 63 us against 173 us), and up to
+    # NATIVE_INVERSE_PARALLEL_MAX_SIZE when the batch of at least NATIVE_INVERSE_PARALLEL_MIN_BATCH matrices
+    # runs in parallel (k = 64, batch 8: 0.64 ms against 0.98 ms); LAPACK wins beyond (measured on 12 cores).
+    NATIVE_INVERSE_MAX_SIZE = 40
+    NATIVE_INVERSE_PARALLEL_MAX_SIZE = 96
+    NATIVE_INVERSE_PARALLEL_MIN_BATCH = 8
 
     @staticmethod
     def setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output):
@@ -110,6 +134,9 @@ class PfaffianStrategy(torch.autograd.Function):
             adjugate = pfaffian[..., None, None] * inverse  # pf(A) A^{-1}; replaced where singular
             adjugate = torch.where(round_off[..., None, None], torch.zeros_like(adjugate), adjugate)
             return torch.einsum("...,...ij->...ji", 0.5 * grad_output, adjugate.conj())
+        native = cls._native_grad_matrix(matrix, pfaffian, grad_output)
+        if native is not None:
+            return native
         inverse, rank_flag, residual_flag = cls._flagged_inverse(matrix)
         singular = rank_flag | residual_flag | (pfaffian == 0)  # pf == 0 also catches an underflowed pf
         grad_output = grad_output.expand_as(pfaffian)
@@ -146,6 +173,15 @@ class PfaffianStrategy(torch.autograd.Function):
             the residual flag, both boolean of shape ``(...,)``.
         :rtype: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
         """
+        native = cls._native_flagged_inverse(matrix)
+        if native is not None:
+            inverse, rank_flag, residual_flag = native
+            batch_shape = matrix.shape[:-2]
+            return (
+                torch.from_numpy(inverse).reshape(matrix.shape),
+                torch.from_numpy(rank_flag).reshape(batch_shape),
+                torch.from_numpy(residual_flag).reshape(batch_shape),
+            )
         size = matrix.shape[-1]
         epsilon = torch.finfo(matrix.dtype).eps
         identity = torch.eye(size, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
@@ -165,6 +201,75 @@ class PfaffianStrategy(torch.autograd.Function):
             flagged = rank_flag | residual_flag
             inverse, _ = torch.linalg.inv_ex(torch.where(flagged[..., None, None], identity, matrix))
         return inverse, rank_flag, residual_flag
+
+    @staticmethod
+    def _native_flagged_inverse(matrix: torch.Tensor) -> tuple[Any, Any, Any] | None:
+        """
+        :meth:`_flagged_inverse` from the Rust kernel, as NumPy arrays, for CPU inputs without a graph to build.
+
+        One native call replaces the LU factorization, the solve, the residual product and the dozen small
+        operators around them, which dominate the backward of small inputs. The flags follow the same
+        criteria (the kernel's LU pivots on the modulus, LAPACK's complex LU on ``|re| + |im|``, so a complex
+        element right at a threshold can be flagged differently). It is used up to ``k =
+        NATIVE_INVERSE_MAX_SIZE``, and up to ``NATIVE_INVERSE_PARALLEL_MAX_SIZE`` for batches of at least
+        ``NATIVE_INVERSE_PARALLEL_MIN_BATCH`` matrices, where it is faster.
+
+        :param matrix: Square matrices of shape ``(..., k, k)`` with ``k >= 1``.
+        :return: The inverse, of shape ``(batch, k, k)``, and the two flags, of shape ``(batch,)``, with the
+            batch dimensions flattened; or ``None`` when the input is not on CPU, has another dtype or size,
+            needs a differentiable inverse (double backward), or the extension is not built.
+        :rtype: tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray] | None
+        """
+        kernel = _NATIVE_INVERSE.get(matrix.dtype)
+        if kernel is None or matrix.device.type != "cpu" or (torch.is_grad_enabled() and matrix.requires_grad):
+            return None
+        size = matrix.shape[-1]
+        batch = matrix.numel() // max(1, size * size)
+        if size > PfaffianStrategy.NATIVE_INVERSE_MAX_SIZE and not (
+            batch >= PfaffianStrategy.NATIVE_INVERSE_PARALLEL_MIN_BATCH
+            and size <= PfaffianStrategy.NATIVE_INVERSE_PARALLEL_MAX_SIZE
+        ):
+            return None
+        return kernel(matrix.detach().reshape(-1, size, size).contiguous().resolve_conj().numpy())
+
+    @classmethod
+    def _native_grad_matrix(
+        cls, matrix: torch.Tensor, pfaffian: torch.Tensor, grad_output: torch.Tensor
+    ) -> torch.Tensor | None:
+        """
+        :meth:`pfaffian_grad_matrix` in NumPy around the Rust inverse, where :meth:`_native_flagged_inverse` applies.
+
+        The same computation as the PyTorch path (the adjugate ``pf(A) A^{-1}``, zero where flagged, then the
+        exact adjugate on the flagged elements whose ``grad_output`` is nonzero), with NumPy's microsecond
+        operators instead of PyTorch's, which dominate the backward of small inputs.
+
+        :param matrix: The saved input matrix of shape ``(..., n, n)``.
+        :param pfaffian: The saved forward Pfaffian of shape ``(...,)``.
+        :param grad_output: Gradient of the output with respect to the loss, broadcastable to ``(...,)``.
+        :return: The gradient, of shape ``(..., n, n)``, or ``None`` when the native path does not apply
+            (including a ``grad_output`` that requires grad, or a Pfaffian or ``grad_output`` off the CPU).
+        :rtype: torch.Tensor | None
+        """
+        if grad_output.requires_grad or pfaffian.device.type != "cpu" or grad_output.device.type != "cpu":
+            return None
+        native = cls._native_flagged_inverse(matrix)
+        if native is None:
+            return None
+        inverse, rank_flag, residual_flag = native
+        values = pfaffian.detach().resolve_conj().reshape(-1).numpy()
+        weights = grad_output.detach().expand_as(pfaffian).resolve_conj().reshape(-1).numpy()
+        singular = rank_flag | residual_flag | (values == 0)  # pf == 0 also catches an underflowed pf
+        adjugate = values[:, None, None] * inverse  # pf(A) A^{-1}; replaced where singular
+        adjugate[singular] = 0
+        exact = singular & (weights != 0)  # elements needing the minor adjugate
+        if exact.any():
+            exact_index = torch.from_numpy(exact.nonzero()[0])
+            dimension = matrix.shape[-1]
+            with torch.no_grad():
+                flagged = matrix.detach().reshape(-1, dimension, dimension).index_select(0, exact_index)
+                adjugate[exact] = cls._singular_pfaffian_adjugate(flagged).to(matrix.dtype).numpy()
+        gradient = 0.5 * weights[:, None, None] * adjugate.conj().transpose(0, 2, 1)
+        return torch.from_numpy(gradient.astype(adjugate.dtype, copy=False)).reshape(matrix.shape)
 
     @classmethod
     def _round_off_inverse(cls, matrix: torch.Tensor, pfaffian: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

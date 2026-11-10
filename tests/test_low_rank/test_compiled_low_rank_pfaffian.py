@@ -14,6 +14,9 @@ from tests.configs import (
 from torch_pfaffian import pfaffian
 from torch_pfaffian.low_rank import CompiledLowRankPfaffian, LowRankPfaffian, PfaffianChain, PfaffianUpdater
 
+# The Rust kernels' table, kept before the fixture below switches it off for the compiler tests.
+NATIVE_KERNELS = LowRankPfaffian._native_kernels
+
 DIMENSION = 8
 BATCH = 3
 
@@ -38,6 +41,11 @@ class TestCompiledLowRankPfaffian:
     def _random(*shape: int, seed: int = TEST_SEED + 1) -> torch.Tensor:
         generator = torch.Generator().manual_seed(seed)
         return torch.randn(*shape, generator=generator, dtype=torch.float64)
+
+    @pytest.fixture(autouse=True)
+    def _without_native_kernels(self, monkeypatch):
+        # CPU calls without a graph take the Rust kernels before the compiler; these tests are about the compiler.
+        monkeypatch.setattr(LowRankPfaffian, "_native_kernels", staticmethod(lambda: {}))
 
     @pytest.fixture
     def require_compile(self):
@@ -174,3 +182,20 @@ class TestCompiledLowRankPfaffian:
             rtol=RTOL_SCALAR_COMPARISON,
         )
         assert calls == [LowRankPfaffian._ratio_core]
+
+    def test_cpu_calls_without_a_graph_take_the_native_kernels_first(self, monkeypatch):
+        pytest.importorskip("torch_pfaffian._rust")
+        monkeypatch.setattr(LowRankPfaffian, "_native_kernels", NATIVE_KERNELS)
+
+        def no_compile(core):
+            raise AssertionError("the native kernel should have been used")
+
+        monkeypatch.setattr(CompiledLowRankPfaffian, "_compiled", staticmethod(no_compile))
+        inverse = torch.linalg.inv(self._skew(BATCH, DIMENSION, DIMENSION))
+        update = self._random(BATCH, DIMENSION, 2)
+        torch.testing.assert_close(
+            CompiledLowRankPfaffian.ratio(inverse, update),
+            LowRankPfaffian._ratio_core(inverse, update),
+            atol=ATOL_SCALAR_COMPARISON,
+            rtol=RTOL_SCALAR_COMPARISON,
+        )

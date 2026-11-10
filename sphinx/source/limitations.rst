@@ -79,6 +79,10 @@ For ``m > 6`` the linear-domain signed path treats a pivot below ``PfaffianStrat
 Devices and platforms
 ---------------------
 
-The Rust kernel runs on CPU only. CUDA inputs use the PyTorch implementation of the same algorithm on
-the device. Prebuilt wheels with the Rust kernel exist for Linux x86_64, Windows x86_64 and macOS arm64;
+The Rust kernel runs on CPU only. A small signed CUDA input (``batch * m^2 <= 2^20``) is copied to the host,
+computed by the Rust kernel and its Pfaffian copied back, since the elimination on the device is bound by its
+kernel launches at those sizes; this synchronizes with the device, and the backward runs on the device. Larger
+CUDA inputs, and inputs during a CUDA graph capture, use the PyTorch implementation of the same algorithm on the
+device; in ``float32`` and ``float64`` its elimination runs as one Triton kernel when Triton is installed (it is,
+with PyTorch's CUDA wheels), and complex inputs use the PyTorch loop. :func:`torch_pfaffian.slog_pfaffian` always runs on the device. Prebuilt wheels with the Rust kernel exist for Linux x86_64, Windows x86_64 and macOS arm64;
 on other platforms installing from source needs a Rust toolchain.

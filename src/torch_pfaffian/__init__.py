@@ -18,6 +18,7 @@ except importlib.metadata.PackageNotFoundError:
 import warnings
 from collections.abc import Callable
 
+import numpy as np
 import torch
 
 from .kernels import log_magnitude_pfaffian, magnitude_pfaffian
@@ -35,6 +36,13 @@ AUTO_SMALL_MAX = 6
 # [[0, B], [-B^T, 0]] are routed to PfaffianBlockDet (one n x n determinant). Below this size the block-form
 # check and the strategy's overhead outweigh its gain over the general paths (measured on CPU).
 AUTO_BLOCK_DET_MIN_NUMEL = 2**14
+# Signed inputs on another device (CUDA) with batch * m^2 at most AUTO_HOST_MAX_BATCH_SQUARE are computed by the
+# Rust kernel on the host and the result copied back. On the device, each of the m / 2 elimination steps of
+# PfaffianParlettReid costs about a dozen kernel launches (about 0.2 ms per step on an RTX 3070), whatever the
+# batch; on the host, the Rust kernel costs about 4e-11 s * batch * m^3 on 12 cores, and up to 4x that in some
+# process states (measured, not explained). The two meet between batch * m^2 = 2^20 and 2^22; 2^20 keeps the host
+# route faster in both states (m = 256 with a batch of 16 takes 4 to 16 ms on the host, 22 ms on the device).
+AUTO_HOST_MAX_BATCH_SQUARE = 2**20
 # Dtypes with a PyTorch LU factorization, which every path beyond the unrolled small kernel needs.
 LU_DTYPES = (torch.float32, torch.float64, torch.complex64, torch.complex128)
 # Dtypes without one (and, for complex32, without most arithmetic kernels). They are computed in
@@ -43,6 +51,8 @@ LOW_PRECISION_DTYPES = (torch.float16, torch.bfloat16, torch.complex32)
 UPCAST_DTYPE = torch.float32
 UPCAST_COMPLEX_DTYPE = torch.complex64
 SUPPORTED_DTYPES = LU_DTYPES + LOW_PRECISION_DTYPES
+# Dtypes whose CPU results _all_finite tests with NumPy (which has no bfloat16 or complex32).
+_NUMPY_DTYPES = (torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
 
 
 def _check_dtype(function_name: str, dtype: torch.dtype) -> None:
@@ -159,6 +169,7 @@ def pfaffian(
     ``m <= AUTO_SMALL_MAX``                     ``PfaffianSmall``            exact unrolled kernel (all dtypes)
     block form, large input (see below)         ``PfaffianBlockDet``         one ``n x n`` determinant
     ``sign=True``, Rust built, CPU input        ``RustPfaffianParlettReid``  fastest signed path (native Rust)
+    ``sign=True``, Rust built, small GPU input  ``RustPfaffianParlettReid``  on the host: launch-bound on GPU
     ``sign=True``, otherwise                    ``PfaffianParlettReid``      GPU-native and pure-Python fallback
     ``sign=False``, ``epsilon`` given           ``magnitude_pfaffian``       log-domain magnitude with floor
     ``sign=False``, grad needed                 ``PfaffianFDBPf``            magnitude only; robust backward
@@ -168,10 +179,16 @@ def pfaffian(
     Matrices with last dimension ``m <= AUTO_SMALL_MAX`` take the exact unrolled ``PfaffianSmall`` path
     first, regardless of ``sign`` and device (``|Pf|`` for ``sign=False``); it is exact for every dtype
     and differentiable end-to-end. For larger matrices the Rust kernel runs on CPU (in real and complex
-    precisions), so a non-CPU (e.g. CUDA) input is routed to ``PfaffianParlettReid``, which runs
-    natively on the input device and avoids a host round-trip. All signed strategies compute the correct
-    complex signed Pfaffian without discarding the imaginary part and are differentiable end-to-end for
-    real and complex inputs (the complex backward follows PyTorch's Wirtinger convention).
+    precisions). A non-CPU (e.g. CUDA) input is computed by the same kernel on the host when it is small
+    (``batch * m^2 = matrix.numel() <= AUTO_HOST_MAX_BATCH_SQUARE``), since the device elimination is
+    bound by its kernel launches there: the matrix is copied to the host and the Pfaffian back, which
+    synchronizes with the device, and the backward runs on the device. Larger inputs, and inputs while a
+    CUDA graph is being captured, are routed to ``PfaffianParlettReid``, which runs natively on the input
+    device without a host round-trip; in ``float32`` and ``float64``, with Triton installed, its elimination is
+    a single Triton kernel launch for the whole batch (see
+    :class:`~torch_pfaffian.kernels.ParlettReidTriton`). All signed strategies compute the correct complex
+    signed Pfaffian without discarding the imaginary part and are differentiable end-to-end for real and
+    complex inputs (the complex backward follows PyTorch's Wirtinger convention).
 
     Inputs with ``m > AUTO_SMALL_MAX`` and at least ``AUTO_BLOCK_DET_MIN_NUMEL`` entries in total are tested
     for the block form ``[[0, B], [-B^T, 0]]`` (both diagonal blocks exactly zero for every batch element).
@@ -295,9 +312,13 @@ def _pfaffian(
             # Same floor as the PfaffianDet / PfaffianFDBPf magnitude paths this route replaces.
             result = torch.clamp(result.abs(), min=PfaffianStrategy.EPSILON**0.5)
     elif sign:
-        # The Rust kernel is CPU-only, so non-CPU inputs use the device-native PyTorch strategy.
-        if RustPfaffianParlettReid is not None and matrix.device.type == "cpu":
-            result = RustPfaffianParlettReid.apply(matrix)
+        # The Rust kernel is CPU-only. Small non-CPU inputs still take it, through the host, since the device
+        # elimination is launch-bound there; larger ones use the device-native PyTorch strategy.
+        if RustPfaffianParlettReid is not None and (matrix.device.type == "cpu" or _on_host(matrix)):
+            # Without a graph to build, the forward is called directly: autograd's Function.apply costs about
+            # 20 us, more than the kernel itself on small inputs.
+            needs_graph = matrix.requires_grad and torch.is_grad_enabled()
+            result = RustPfaffianParlettReid.apply(matrix) if needs_graph else RustPfaffianParlettReid.forward(matrix)
         else:
             result = PfaffianParlettReid.apply(matrix)
     elif epsilon is not None:
@@ -307,7 +328,7 @@ def _pfaffian(
     else:
         result = PfaffianDet.apply(matrix)
 
-    if check_finite and not torch.isfinite(result).all():
+    if check_finite and not _all_finite(result):
         if matrix.dtype in LOW_PRECISION_DTYPES:
             # The unrolled kernel overflowed in half precision; the log-domain recovery needs an LU.
             return _pfaffian_upcast(matrix, sign, check_finite, epsilon, mask_roundoff_gradient, stacklevel + 1)
@@ -347,6 +368,34 @@ def _pfaffian(
                 stacklevel=stacklevel,
             )
     return result
+
+
+def _all_finite(result: torch.Tensor) -> bool:
+    """
+    Whether every entry of a Pfaffian result is finite.
+
+    :param result: The Pfaffians, of any shape.
+    :return: ``True`` when every entry is finite. A CPU result is tested by NumPy, which costs a microsecond
+        against the about 10 us of ``torch.isfinite(result).all()`` and its conversion to ``bool``.
+    :rtype: bool
+    """
+    if result.device.type == "cpu" and result.dtype in _NUMPY_DTYPES:
+        return bool(np.isfinite(result.detach().resolve_conj().numpy()).all())
+    return bool(torch.isfinite(result).all())
+
+
+def _on_host(matrix: torch.Tensor) -> bool:
+    """
+    Whether a signed input on a non-CPU device is computed by the Rust kernel on the host.
+
+    :param matrix: Skew-symmetric matrix of shape ``(..., m, m)`` on a non-CPU device.
+    :return: ``True`` when ``batch * m^2 <= AUTO_HOST_MAX_BATCH_SQUARE`` and no CUDA graph is being captured (a
+        capture cannot copy to the host).
+    :rtype: bool
+    """
+    if matrix.numel() > AUTO_HOST_MAX_BATCH_SQUARE:  # batch * m^2
+        return False
+    return not (matrix.device.type == "cuda" and torch.cuda.is_current_stream_capturing())
 
 
 def _pfaffian_upcast(

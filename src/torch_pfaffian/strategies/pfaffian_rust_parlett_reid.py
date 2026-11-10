@@ -23,12 +23,16 @@ class RustPfaffianParlettReid(PfaffianStrategy):
     :class:`PfaffianParlettReid` (the Pfaffian adjugate
     ``d pf(A) / d A = (1 / 2) pf(A) (A^{-1})^T``, exact for invertible and singular inputs and
     conjugated for complex autograd), computed in PyTorch. CUDA inputs are evaluated on CPU for the
-    forward; the backward runs on the input device.
+    forward; the backward runs on the host too for small inputs (at most ``HOST_BACKWARD_MAX_NUMEL`` entries),
+    except a double backward, and on the input device otherwise.
 
     The input is a skew-symmetric matrix of shape ``(..., n, n)``.
     """
 
     NAME = "RustPfaffianParlettReid"
+    # Non-CPU inputs with at most this many entries also run their backward on the host (measured on an RTX 3070:
+    # m = 32 and 64, batch 1, 30% faster; m = 8 with a batch of 256 (2^14 entries) already slower).
+    HOST_BACKWARD_MAX_NUMEL = 2**13
 
     _KERNEL_BY_DTYPE = {
         torch.float16: ("signed_pfaffian_f16", torch.float16),
@@ -77,4 +81,14 @@ class RustPfaffianParlettReid(PfaffianStrategy):
         matrix, pfaffian = cast("tuple[torch.Tensor, torch.Tensor]", ctx.saved_tensors)
         if not ctx.needs_input_grad[0]:
             return None
+        if (
+            matrix.device.type != "cpu"
+            and matrix.numel() <= RustPfaffianParlettReid.HOST_BACKWARD_MAX_NUMEL
+            and not torch.is_grad_enabled()
+        ):  # pragma: no cover - needs a GPU
+            # On a device the LU, solve and checks of a small input are a few dozen kernels bound by their launches,
+            # so the backward runs on the host like the forward. A double backward (create_graph) stays on the
+            # device, as do larger inputs, whose host backward grows with the batch while the device one does not.
+            gradient = RustPfaffianParlettReid.pfaffian_grad_matrix(matrix.cpu(), pfaffian.cpu(), grad_output.cpu())
+            return gradient.to(matrix.device)
         return RustPfaffianParlettReid.pfaffian_grad_matrix(matrix, pfaffian, grad_output)

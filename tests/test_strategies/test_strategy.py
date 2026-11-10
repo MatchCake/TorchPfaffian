@@ -10,6 +10,7 @@ from tests.configs import (
     RTOL_SINGLE_PRECISION_COMPARISON,
     TEST_SEED,
 )
+from torch_pfaffian.strategies import strategy as strategy_module
 from torch_pfaffian.strategies.pfaffian_parlett_reid import PfaffianParlettReid
 from torch_pfaffian.strategies.strategy import PfaffianStrategy
 
@@ -700,3 +701,73 @@ class TestPfaffianStrategy:
         (gradient,) = torch.autograd.grad(PfaffianParlettReid.apply(leaf).sum(), leaf, create_graph=True)
         (second,) = torch.autograd.grad(gradient.pow(2).sum(), leaf)
         assert torch.isfinite(second).all()
+
+    @staticmethod
+    def _native_cases(dtype: torch.dtype, size: int, batch: int) -> torch.Tensor:
+        generator = torch.Generator().manual_seed(TEST_SEED + size)
+        entries = torch.randn(batch, size, size, generator=generator, dtype=torch.float64)
+        if dtype.is_complex:
+            entries = torch.complex(entries, torch.randn(entries.shape, generator=generator, dtype=torch.float64))
+        matrices = (entries - entries.mT).to(dtype)
+        matrices[1] = 0  # rank-flagged
+        matrices[2, :, 0] = 0  # rank-flagged: an exactly zero column and row
+        matrices[2, 0, :] = 0
+        matrices[3, 0, 1] = float("nan")  # NaN: flagged
+        return matrices
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.complex64, torch.complex128])
+    @pytest.mark.parametrize(("size", "batch"), [(8, 6), (64, 9)])  # one thread, and a parallel batch
+    def test_native_flagged_inverse_matches_pytorch(self, dtype, size, batch, monkeypatch):
+        pytest.importorskip("torch_pfaffian._rust")
+        matrices = self._native_cases(dtype, size, batch)
+        assert PfaffianStrategy._native_flagged_inverse(matrices) is not None
+        native = PfaffianStrategy._flagged_inverse(matrices)
+        monkeypatch.setattr(strategy_module, "_NATIVE_INVERSE", {})
+        reference = PfaffianStrategy._flagged_inverse(matrices)
+        torch.testing.assert_close(native[1], reference[1])
+        torch.testing.assert_close(native[2], reference[2])
+        kept = ~(reference[1] | reference[2])
+        if dtype in (
+            torch.float32,
+            torch.complex64,
+        ):  # random 64 x 64 matrices can be ill-conditioned in single precision
+            atol, rtol = ATOL_APPROX_COMPARISON, RTOL_APPROX_COMPARISON
+        else:
+            atol, rtol = ATOL_MATRIX_COMPARISON, RTOL_MATRIX_COMPARISON
+        torch.testing.assert_close(native[0][kept], reference[0][kept], atol=atol, rtol=rtol)
+
+    def test_native_paths_apply_only_where_faster_and_without_a_graph(self):
+        pytest.importorskip("torch_pfaffian._rust")
+        small, large = torch.zeros(1, 8, 8, dtype=torch.float64), torch.zeros(1, 64, 64, dtype=torch.float64)
+        assert PfaffianStrategy._native_flagged_inverse(small) is not None
+        assert PfaffianStrategy._native_flagged_inverse(large) is None  # one large matrix: LAPACK is faster
+        assert PfaffianStrategy._native_flagged_inverse(large.expand(8, 64, 64)) is not None  # parallel batch
+        assert PfaffianStrategy._native_flagged_inverse(small.half()) is None  # no kernel for float16
+        assert PfaffianStrategy._native_flagged_inverse(small.requires_grad_(True)) is None  # double backward
+        pfaffian_value, weight = torch.ones(1, dtype=torch.float64), torch.ones(1, dtype=torch.float64)
+        assert PfaffianStrategy._native_grad_matrix(small.detach(), pfaffian_value, weight.requires_grad_(True)) is None
+        assert PfaffianStrategy._native_grad_matrix(large, pfaffian_value, torch.ones(1, dtype=torch.float64)) is None
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    def test_native_gradient_matches_pytorch_including_singular_elements(self, dtype, monkeypatch):
+        pytest.importorskip("torch_pfaffian._rust")
+        matrices = self._native_cases(dtype, 8, 6)
+        matrices[3] = matrices[4]  # no NaN here: the singular elements take the exact adjugate
+        matrices[2, 1, 2], matrices[2, 2, 1] = 1.0, -1.0
+        pfaffians = PfaffianParlettReid.forward(matrices)
+        grad_output = torch.arange(1.0, 7.0, dtype=torch.float64).to(dtype)
+        grad_output[5] = 0  # skipped, though singular or not
+        regular = [0, 4]  # no singular element: no exact adjugate on either path
+        native = PfaffianParlettReid.pfaffian_grad_matrix(matrices, pfaffians, grad_output)
+        native_regular = PfaffianParlettReid.pfaffian_grad_matrix(
+            matrices[regular], pfaffians[regular], grad_output[regular]
+        )
+        monkeypatch.setattr(strategy_module, "_NATIVE_INVERSE", {})
+        reference = PfaffianParlettReid.pfaffian_grad_matrix(matrices, pfaffians, grad_output)
+        reference_regular = PfaffianParlettReid.pfaffian_grad_matrix(
+            matrices[regular], pfaffians[regular], grad_output[regular]
+        )
+        torch.testing.assert_close(native, reference, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+        torch.testing.assert_close(
+            native_regular, reference_regular, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )

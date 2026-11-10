@@ -2,7 +2,7 @@ import functools
 import importlib
 import types
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import torch
 
@@ -48,7 +48,18 @@ class LowRankPfaffian:
     matrix's gradient is meaningful.
 
     :class:`~torch_pfaffian.low_rank.PfaffianUpdater` chains such updates, with delayed inverse updates.
+
+    On CPU, without a graph to build (``torch.no_grad()``, or inputs that do not require grad), ``ratio``,
+    ``ratio_and_inverse``, ``ratio_replace`` and ``ratio_replace_and_inverse`` run in one call of the compiled
+    Rust extension instead of a handful of PyTorch operators, which dominate small inputs (a rank-2 ratio and
+    inverse of one ``n = 32`` matrix: 17 us instead of 77 us). Updates wider than rank 2 on large batches keep
+    the PyTorch path, whose matrix products are faster there.
     """
+
+    # Updates wider than rank 2 take the Rust kernel only below this many inverse entries (batch * n^2): above,
+    # PyTorch's BLAS products win (measured on one thread: n = 128 with a batch of 64, rank 4, 13 us against 9 us
+    # per matrix; a batch of 64 with n = 32, 1.8 us against 1.8 us).
+    NATIVE_WIDE_MAX_NUMEL = 2**16
 
     @staticmethod
     def skew_identity(
@@ -241,6 +252,92 @@ class LowRankPfaffian:
         return importlib.import_module("torch_pfaffian")
 
     @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def _native_kernels() -> dict[Callable, dict[torch.dtype, Callable]]:
+        # The Rust kernels of the cores, per dtype; empty without the compiled extension.
+        try:
+            from .. import _rust
+        except ImportError:  # pragma: no cover - without the compiled extension
+            return {}
+        suffixes = {torch.float32: "f32", torch.float64: "f64", torch.complex64: "c64", torch.complex128: "c128"}
+        names: dict[Callable, str] = {
+            LowRankPfaffian._ratio_core: "low_rank_ratio",
+            LowRankPfaffian._ratio_and_inverse_core: "low_rank_ratio_and_inverse",
+            LowRankPfaffian._ratio_replace_core: "replace_ratio",
+            LowRankPfaffian._ratio_replace_and_inverse_core: "replace_ratio_and_inverse",
+        }
+        return {
+            core: {dtype: getattr(_rust, f"{name}_{suffix}") for dtype, suffix in suffixes.items()}
+            for core, name in names.items()
+        }
+
+    @staticmethod
+    def _native_call(core: Callable[..., T], tensors: tuple[torch.Tensor, ...]) -> T | None:
+        """
+        Run a core with its Rust kernel, for CPU inputs without a graph to build.
+
+        A core is a handful of small PyTorch operators, whose per-operator cost (a few microseconds each on CPU)
+        dominates single small matrices; the kernel does the same arithmetic in one native call. It applies when
+        the core has a kernel for the dtype, every input is on CPU, no input needs a gradient, the inputs share
+        their batch shape without broadcasting, and the inverse is stored row- or column-major; otherwise it
+        returns ``None``, for the PyTorch core.
+
+        :param core: One of the cores with a kernel (see :meth:`_native_kernels`).
+        :param tensors: The core's validated inputs: ``(inverse, update)`` or ``(inverse, index, change)``.
+        :return: The core's result, or ``None``.
+        :rtype: T | None
+        """
+        kernel = LowRankPfaffian._native_kernels().get(core, {}).get(tensors[0].dtype)
+        if kernel is None or any(tensor.device.type != "cpu" for tensor in tensors):
+            return None
+        if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in tensors):
+            return None
+        inverse, others = tensors[0], tensors[1:]
+        size = inverse.shape[-1]
+        batch_shape = inverse.shape[:-2]
+        offset = 2 if len(others) == 1 else 1  # update (..., n, 2k), or index (...) and change (..., n)
+        if others[-1].shape[: others[-1].dim() - offset] != batch_shape or (
+            len(others) == 2 and others[0].shape != batch_shape
+        ):
+            return None
+        if len(others) == 1 and others[0].shape[-1] > 2 and inverse.numel() >= LowRankPfaffian.NATIVE_WIDE_MAX_NUMEL:
+            return None  # wide updates of large batches: BLAS's matrix products beat the kernel's dot products
+        # A column-major inverse (as torch.linalg.inv returns) is passed as its row-major transpose.
+        if inverse.is_contiguous():
+            buffer, transposed = inverse, False
+        elif inverse.mT.is_contiguous():
+            buffer, transposed = inverse.mT, True
+        else:
+            return None  # broadcast or strided: copying it would cost more than the PyTorch core
+        array = LowRankPfaffian._numpy
+        if len(others) == 1:
+            result = kernel(array(buffer, 3), transposed, array(others[0], 3))
+        else:
+            result = kernel(array(buffer, 3), transposed, array(others[0], 1), array(others[1], 2))
+        flat = len(batch_shape) == 1
+        if isinstance(result, tuple):
+            ratio, new_inverse = torch.from_numpy(result[0]), torch.from_numpy(result[1])
+            if transposed:  # the kernel updated the transpose: the result keeps the input's column-major layout
+                new_inverse = new_inverse.mT
+            if not flat:
+                ratio, new_inverse = ratio.reshape(batch_shape), new_inverse.reshape(*batch_shape, size, size)
+            return ratio, new_inverse  # type: ignore[return-value]
+        ratio = torch.from_numpy(result)
+        return ratio if flat else ratio.reshape(batch_shape)  # type: ignore[return-value]
+
+    @staticmethod
+    def _numpy(tensor: torch.Tensor, dimensions: int) -> Any:
+        # A C-contiguous NumPy view with the batch dimensions flattened (dimensions - 1 trailing ones kept), with
+        # only the conversions the tensor needs: each costs about a microsecond, a fair share of a small call.
+        if tensor.dim() != dimensions:
+            tensor = tensor.reshape(-1, *tensor.shape[tensor.dim() - dimensions + 1 :])
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+        if tensor.is_conj():
+            tensor = tensor.resolve_conj()
+        return tensor.numpy()
+
+    @staticmethod
     @functools.lru_cache(maxsize=64)
     def _cached_skew_identity(rank: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
         # J is a constant: building it costs five small kernels, more than the rest of a rank-2 ratio on CPU.
@@ -322,7 +419,9 @@ class LowRankPfaffian:
         compute_dtype = LowRankPfaffian._compute_dtype(function_name, dtype)
         inverse = LowRankPfaffian._restore(SkewGradient.apply_if_needed(inverse), compute_dtype)
         change = LowRankPfaffian._restore(change, compute_dtype)
-        batch_shape = torch.broadcast_shapes(inverse.shape[:-2], index.shape, change.shape[:-1])
+        batch_shape = inverse.shape[:-2]
+        if index.shape != batch_shape or change.shape[:-1] != batch_shape:  # broadcast_shapes costs about 10 us
+            batch_shape = torch.broadcast_shapes(batch_shape, index.shape, change.shape[:-1])
         if change.shape[:-1] != batch_shape:
             change = change.expand(*batch_shape, dimension)
         if index.shape != batch_shape:
@@ -534,5 +633,6 @@ class LowRankPfaffian:
 
     @classmethod
     def _call(cls, core: Callable[..., T], *tensors: torch.Tensor) -> T:
-        # The hook the compiled variant overrides: run a core on validated tensors.
-        return core(*tensors)
+        # The hook the compiled variant overrides: run a core on validated tensors, natively where possible.
+        native = LowRankPfaffian._native_call(core, tensors)
+        return core(*tensors) if native is None else native

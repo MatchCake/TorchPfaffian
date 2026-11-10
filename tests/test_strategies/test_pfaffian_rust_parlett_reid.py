@@ -260,3 +260,21 @@ class TestRustPfaffianParlettReid:
             needs_input_grad = (False,)
 
         assert RustPfaffianParlettReid.backward(_Context(), torch.ones_like(pfaffian)) is None
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+    @pytest.mark.parametrize("batch", [2, 512])  # host backward (small) and device backward (large)
+    def test_cuda_gradients_match_cpu_including_double_backward(self, batch):  # pragma: no cover - needs a GPU
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        entries = torch.randn(batch, 8, 8, generator=generator, dtype=torch.float64)
+        results = []
+        for device in ("cpu", "cuda"):
+            matrix = (entries - entries.mT).to(device).requires_grad_(True)
+            (gradient,) = torch.autograd.grad(RustPfaffianParlettReid.apply(matrix).sum(), matrix, create_graph=True)
+            (second,) = torch.autograd.grad(gradient.square().sum(), matrix)  # double backward, on the device
+            (first,) = torch.autograd.grad(RustPfaffianParlettReid.apply(matrix).sum(), matrix)
+            assert first.device.type == device and second.device.type == device
+            results.append((first.cpu(), second.cpu()))
+        (first_cuda, second_cuda), (first_cpu, second_cpu) = results[1], results[0]
+        torch.testing.assert_close(first_cuda, first_cpu, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+        # Second derivatives of a few ill-conditioned random matrices differ by device at round-off times cond(A).
+        torch.testing.assert_close(second_cuda, second_cpu, atol=ATOL_APPROX_COMPARISON, rtol=RTOL_APPROX_COMPARISON)

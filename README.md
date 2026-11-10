@@ -53,12 +53,38 @@ and complex matrices, with exact gradients at singular matrices. It is the Pfaff
   domain; `slog_pfaffian()` returns `(phase, log|Pf|)` directly.
 - **Round-off zeros.** `mask_roundoff_gradient=True` gives a zero gradient to Pfaffians that vanish up to
   round-off, such as parity-forbidden amplitudes.
-- **Batched and device-agnostic.** Any leading batch shape, on CPU or CUDA, with a native Rust kernel on CPU.
-  On CPU it is faster than pfapack's C implementation on batches of small matrices, and on batches of large
-  ones with several threads; on a single matrix, pfapack is faster. See the
+- **Batched and device-agnostic.** Any leading batch shape, on CPU or CUDA. On CPU, a native Rust kernel
+  computes the Pfaffian and the inverse of its backward. On CUDA, small inputs are computed by that kernel on
+  the host (the device would be bound by kernel launches), and larger real ones by a single Triton kernel per
+  batch. On CPU it is faster than pfapack's C implementation on batches of small matrices, and on batches of
+  large ones with several threads; on a single matrix, pfapack is faster. See the
   [performance](https://matchcake.github.io/TorchPfaffian/performance.html) page.
-  `benchmarks/library_comparison.py` times TorchPfaffian, pfapack, torchpfaff and lrux side by side, on CPU
-  and on GPU when available.
+- **Low-rank updates.** `LowRankPfaffian` gives Pfaffian ratios and updated inverses under low-rank updates
+  and row replacements, `PfaffianUpdater` chains them (with delayed updates), and `PfaffianChain` grows a
+  matrix block by block for qubit-by-qubit sampling. On CPU without gradients they run in Rust kernels.
+
+## Benchmarks
+
+`benchmarks/library_comparison.py` times TorchPfaffian, pfapack, torchpfaff and lrux side by side, on CPU
+and on GPU when available, with the time and the peak memory of each call, and `benchmarks/plot_results.py`
+plots them (see
+[benchmarks/README.md](https://github.com/MatchCake/TorchPfaffian/blob/dev/benchmarks/README.md)).
+Comparing each library at its best method and device with the fastest library on each input (full Pfaffians
+with and without gradients, float64 and complex128, `m` from 8 to 256, and low-rank ratios, `n` from 32 to
+512, batches of 1 to 256; one CPU thread and an RTX 3070):
+
+| | fastest on, CPU | time vs fastest, CPU | fastest on, CUDA | time vs fastest, CUDA |
+|---|---|---|---|---|
+| TorchPfaffian | 35% | 1.4x | 36% | 1.6x |
+| lrux | 49% | 1.7x | 60% | 1.4x |
+| pfapack (C) | 19% | 7.9x | | |
+| torchpfaff | 0% | 25x | 33% | 3.5x |
+
+The time is the geometric mean, over the inputs a library computes, of its time over the fastest one's. A
+method whose first call takes over 10 s is timed from that call, compilation included, which raises the CUDA
+means of torchpfaff (its Triton kernel) and lrux on a few inputs.
+Single matrices favor pfapack on CPU and TorchPfaffian or lrux on CUDA; lrux (through fermix's kernels) is
+the fastest on large float64 batches on CUDA. Times depend on the machine: run the script on yours.
 
 ## Requirements
 
@@ -178,7 +204,8 @@ Functions that also return the updated inverse have their own name (`..._and_inv
 - Source: [https://github.com/MatchCake/TorchPfaffian/](https://github.com/MatchCake/TorchPfaffian/).
 - Tutorials: [getting started](https://matchcake.github.io/TorchPfaffian/notebooks/tutorial.html) and
   [domino tilings and dimer probabilities](https://matchcake.github.io/TorchPfaffian/notebooks/domino_tilings.html).
-- Performance against pfapack: [performance](https://matchcake.github.io/TorchPfaffian/performance.html).
+- Performance against pfapack: [performance](https://matchcake.github.io/TorchPfaffian/performance.html);
+  against pfapack, torchpfaff and lrux: the Benchmarks section above.
 - Known limitations (`torch.func`, thread count, half precision): [limitations](https://matchcake.github.io/TorchPfaffian/limitations.html).
 - Changes between versions: [CHANGELOG.md](https://github.com/MatchCake/TorchPfaffian/blob/dev/CHANGELOG.md).
 
@@ -208,10 +235,12 @@ entry from the [Zenodo record](https://doi.org/10.5281/zenodo.24085345).
 TorchPfaffian is compared against [pfapack](https://github.com/basnijholt/pfapack),
 [torchpfaff](https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian) and
 [lrux](https://github.com/ChenAo-Phys/lrux) in `benchmarks/library_comparison.py`. lrux, in JAX, computes
-determinant and Pfaffian ratios under low-rank updates, the inner loop of fermionic Monte Carlo;
+determinant and Pfaffian ratios under low-rank updates, the inner loop of fermionic Monte Carlo, and its full
+Pfaffians come from [fermix](https://github.com/ChenAo-Phys/fermix), batched determinants and Pfaffians with
+JAX/Pallas kernels on GPU;
 TorchPfaffian's `LowRankPfaffian` and `PfaffianUpdater` implement the same Pfaffian updates in PyTorch
 ([#33](https://github.com/MatchCake/TorchPfaffian/issues/33)), and `--ratios` compares them with lrux.
-If you use torchpfaff or lrux, please cite them as well:
+If you use torchpfaff, lrux or fermix, please cite them as well:
 ```
 @software{adams_torchpfaff,
   author  = {Corey Adams},
@@ -230,5 +259,14 @@ If you use torchpfaff or lrux, please cite them as well:
   primaryClass  = {cond-mat.str-el},
   doi           = {10.48550/arXiv.2602.05255},
   url           = {https://arxiv.org/abs/2602.05255},
+}
+
+@software{chen_fermix,
+  author  = {Ao Chen},
+  title   = {{fermix}: Fast batched real and complex determinants and {Pfaffians} on {GPU} with {JAX}/{Pallas}
+             kernels},
+  year    = {2026},
+  version = {0.1.0},
+  url     = {https://github.com/ChenAo-Phys/fermix},
 }
 ```
