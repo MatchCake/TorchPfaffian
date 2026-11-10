@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Any, cast
 
+import numpy as np
 import torch
 
 from .. import _rust
@@ -31,6 +32,9 @@ class RustPfaffianParlettReid(PfaffianStrategy):
     """
 
     NAME = "RustPfaffianParlettReid"
+    # Attribute holding the host values of a device result computed through the host, so that pfaffian()'s
+    # finiteness check reads them instead of copying the result back (a transfer and a synchronization).
+    HOST_VALUES_ATTRIBUTE = "_torch_pfaffian_host_values"
     # Non-CPU inputs with at most this many entries also run their backward on the host (measured on an RTX 3070:
     # m = 32 and 64, batch 1, 30% faster; m = 8 with a batch of 256 (2^14 entries) already slower).
     HOST_BACKWARD_MAX_NUMEL = 2**13
@@ -63,8 +67,10 @@ class RustPfaffianParlettReid(PfaffianStrategy):
         kernel = getattr(_rust, kernel_name)
         array = RustPfaffianParlettReid._host_array(flat.to(working_dtype))
         result = kernel(array)  # (batch,) in working_dtype
-        pfaffian = torch.from_numpy(result).to(dtype=matrix.dtype, device=matrix.device)
-        return pfaffian.reshape(matrix.shape[:-2])
+        pfaffian = torch.from_numpy(result).to(dtype=matrix.dtype, device=matrix.device).reshape(matrix.shape[:-2])
+        if pfaffian.device.type != "cpu":
+            setattr(pfaffian, RustPfaffianParlettReid.HOST_VALUES_ATTRIBUTE, result)
+        return pfaffian
 
     @staticmethod
     def backward(ctx: torch.autograd.function.BackwardCFunction, grad_output: torch.Tensor) -> torch.Tensor | None:
@@ -151,10 +157,24 @@ class RustPfaffianWithInverse(torch.autograd.Function):
         kernel = RustPfaffianWithInverse._KERNEL_BY_DTYPE[matrix.dtype]
         host = torch.from_numpy(RustPfaffianParlettReid._host_array(matrix.reshape(-1, size, size)))
         values, inverse, rank_flag, residual_flag = kernel(host.numpy())
-        output = torch.from_numpy(values).reshape(matrix.shape[:-2]).to(matrix.device)
+        flagged = rank_flag | residual_flag
+        ctx.native = (host.reshape(matrix.shape), values, inverse, flagged)
+        ctx.template = None
+        batch_shape = matrix.shape[:-2]
+        if matrix.device.type != "cpu" and not (flagged | (values == 0)).any():
+            # A device input: the gradient is grad * 0.5 * conj(pf(A) A^{-1})^T, so that template goes to the device
+            # with the Pfaffians, in one transfer, and the backward is one multiplication there instead of a round
+            # trip through the host (two transfers and a synchronization).
+            template = 0.5 * values.conj()[:, None, None] * inverse.conj().transpose(0, 2, 1)
+            packed = torch.from_numpy(np.concatenate([values, template.astype(values.dtype, copy=False).ravel()]))
+            output, template_on_device = packed.to(matrix.device).split((values.size, template.size))
+            output = output.view(batch_shape)
+            ctx.template = template_on_device.view(matrix.shape)
+        else:
+            output = torch.from_numpy(values).reshape(batch_shape).to(matrix.device)
         # The output is saved too: a double backward differentiates the backward through it.
         ctx.save_for_backward(matrix, output)
-        ctx.native = (host.reshape(matrix.shape), values, inverse, rank_flag | residual_flag)
+        setattr(output, RustPfaffianParlettReid.HOST_VALUES_ATTRIBUTE, values)
         return output
 
     @staticmethod
@@ -171,5 +191,7 @@ class RustPfaffianWithInverse(torch.autograd.Function):
         host, values, inverse, flagged = ctx.native
         if torch.is_grad_enabled() or grad_output.requires_grad:  # double backward: the differentiable path
             return RustPfaffianParlettReid.pfaffian_grad_matrix(matrix, output, grad_output)
+        if ctx.template is not None:  # pragma: no cover - needs a GPU
+            return grad_output.view(*grad_output.shape, 1, 1) * ctx.template  # a view: cheaper than indexing
         gradient = RustPfaffianParlettReid._gradient_from_inverse(host, values, grad_output.cpu(), inverse, flagged)
         return gradient.to(matrix.device)

@@ -195,21 +195,19 @@ class TestTorchPfaffian:
 
     @pytest.mark.parametrize(
         ("dtype", "shape", "threads", "on_host"),
-        [
-            (torch.float32, (16, 64, 64), "2", True),  # 2^16 entries: 2^15 per thread, up to 2 threads
-            (torch.float32, (16, 64, 64), "1", False),
-            (torch.float32, (8, 128, 128), "24", False),
-            (torch.float32, (1, 256, 256), "1", True),  # one matrix: one thread anyway
-            (torch.float64, (16, 256, 256), "4", True),  # 2^20 entries: 2^18 per thread, up to 15 threads
-            (torch.float64, (16, 256, 256), "2", False),
-            (torch.float64, (256, 128, 128), "24", False),  # 2^22 entries
-            (torch.float64, (4, 512, 512), "1", True),  # 2^20, a batch of 4: one thread anyway
-            (torch.float64, (64, 32, 32), "24", False),  # many small matrices
-            (torch.float64, (63, 32, 32), "24", True),
-            (torch.float64, (63, 32, 32), "", True),  # the CPU count
+        [  # measured on the benchmark machine: the faster route, by at least 20%
+            (torch.float64, (1, 128, 128), "24", True),  # 0.21 ms on the host, 0.98 ms on the device
+            (torch.float64, (1, 512, 512), "1", True),  # 6.9 ms against 32 ms
+            (torch.float64, (16, 128, 128), "24", True),  # 0.79 ms against 0.99 ms, in parallel on the host
+            (torch.float64, (16, 128, 128), "1", False),  # 2.6 ms against 0.99 ms, on one thread
+            (torch.float64, (256, 32, 32), "24", False),  # 2.7 ms against 0.36 ms
+            (torch.float64, (256, 128, 128), "24", False),  # 23 ms against 4.8 ms
+            (torch.float32, (1, 64, 64), "1", True),  # 0.09 ms against 0.28 ms
+            (torch.float64, (16, 128, 128), "", True),  # as with 24 threads: the CPU count
+            (torch.float32, (64, 64, 64), "24", False),  # 0.51 ms against 0.28 ms
         ],
     )
-    def test_host_route_bounds_with_the_triton_kernel(self, dtype, shape, threads, on_host, monkeypatch):
+    def test_host_route_cost_model_with_the_triton_kernel(self, dtype, shape, threads, on_host, monkeypatch):
         monkeypatch.setenv("RAYON_NUM_THREADS", threads)
         monkeypatch.setattr(torch_pfaffian.os, "cpu_count", lambda: 24)
         matrix = mock.MagicMock()

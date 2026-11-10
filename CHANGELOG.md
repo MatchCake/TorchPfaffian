@@ -43,12 +43,19 @@ changes the package's behaviour, API, documentation or packaging.
 - `RustPfaffianWithInverse`: with a graph on CPU (and for the small CUDA inputs computed on the host), one
   native call gives the Pfaffian and the inverse of its backward, and the backward only forms the gradient:
   `pfaffian()` with its gradient takes 137 us instead of 204 us for one `8 x 8` matrix, 26 us instead of 64 us
-  per matrix for 256 with `m = 32`, and 370 us instead of 485 us for one `8 x 8` matrix on CUDA (#45).
+  per matrix for 256 with `m = 32`, and 273 us instead of 485 us for one `8 x 8` matrix on CUDA (#45). For a
+  device input, the forward sends the Pfaffians and the gradient template `0.5 * conj(pf(A) A^{-1})^T` in one
+  transfer, so the backward is one multiplication on the device, and `pfaffian()`'s finiteness check reads the
+  host values instead of copying the result back.
 - The host route of CUDA inputs copies them into NumPy memory instead of `tensor.cpu()`, whose pages the
   driver may leave unmapped: their first read took a page fault per 4 KiB, which made the Rust kernel 3 to 7x
-  slower in some process states (#45). The bounds of the host route are per dtype with the Triton kernel, and
-  grow with the host threads for parallel batches (`AUTO_HOST_MAX_BATCH_SQUARE_TRITON`); without it they are
+  slower in some process states (#45). With the Triton kernel, a cost model of both routes, fitted on the
+  benchmark machine and accounting for the host threads, chooses between them; without it the bound is
   unchanged.
+- `ParlettReidTriton` delays the rank-2 updates of a panel of 4 or 8 steps and applies them to the trailing
+  block in one pass: float64 batches of 256 take 4.3 ms instead of 17 ms at `m = 128` (17 us per matrix) and
+  27 ms instead of 91 ms at `m = 256`; float32 is up to 2.3x faster (#45). It is used for every size up to
+  `m = 1024`.
 - `LowRankPfaffian.ratio`, `ratio_and_inverse`, `ratio_replace` and `ratio_replace_and_inverse` run in one
   Rust call on CPU without a graph to build: on one thread and one `n = 32` matrix, a rank-2 ratio and
   inverse take 18 us instead of 77 us and a row replacement with its inverse 23 us instead of 119 us,

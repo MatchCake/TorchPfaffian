@@ -79,8 +79,8 @@ For ``m > 6`` the linear-domain signed path treats a pivot below ``PfaffianStrat
 Devices and platforms
 ---------------------
 
-The Rust kernel runs on CPU only. A small signed CUDA input (``batch * m^2`` up to ``2^20``, or the bounds of
-``AUTO_HOST_MAX_BATCH_SQUARE_TRITON`` for real inputs, which grow with the host threads) is copied to the host,
+The Rust kernel runs on CPU only. A small signed CUDA input (``batch * m^2`` up to ``2^20``; for real inputs, when a cost model of both routes,
+which accounts for the host threads, estimates the host faster) is copied to the host,
 computed by the Rust kernel and its Pfaffian copied back, since the elimination on the device is bound by its
 kernel launches at those sizes; this synchronizes with the device, and the backward runs on the device. Larger
 CUDA inputs, and inputs during a CUDA graph capture, use the PyTorch implementation of the same algorithm on the

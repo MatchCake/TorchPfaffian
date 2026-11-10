@@ -42,18 +42,21 @@ AUTO_BLOCK_DET_MIN_NUMEL = 2**14
 # PyTorch elimination, about a dozen kernel launches per step whatever the batch, and the host wins up to
 # batch * m^2 = AUTO_HOST_MAX_BATCH_SQUARE.
 AUTO_HOST_MAX_BATCH_SQUARE = 2**20
-# With the Triton kernel (one launch for the batch), the host wins up to a bound per dtype that grows with the host
-# threads (measured on an RTX 3070 and a 12-core CPU). Batches of at least 8 matrices run in parallel on the host,
-# and their bound is the entry of AUTO_HOST_MAX_BATCH_SQUARE_TRITON per thread, up to its thread cap: float64 2^18
-# with one thread (m = 128 with a batch of 16: 2.4 ms against 3.1 ms; m = 64 with 64: 1.8 ms against 1.1 ms), 2^20
-# with 4 and just below 2^22 from 15 (m = 128 with 256: 27 ms against 16 ms); float32 2^15 with one thread and
-# 2^16 from 2. Smaller batches run on one thread, with the
-# bound of AUTO_HOST_MAX_BATCH_SQUARE_TRITON_SERIAL (float64 m = 512 with 4: 34 ms against 69 ms). Many small
-# matrices go to the kernel, which runs them in parallel: m <= 32 with a batch of 64 or more.
-AUTO_HOST_MAX_BATCH_SQUARE_TRITON = {torch.float32: (2**15, 2), torch.float64: (2**18, 15)}
-AUTO_HOST_MAX_BATCH_SQUARE_TRITON_SERIAL = {torch.float32: 2**16, torch.float64: 2**22 - 1}
-AUTO_TRITON_SMALL_MAX_DIMENSION = 32
-AUTO_TRITON_SMALL_MIN_BATCH = 64
+# With the Triton kernel (one launch for the batch), a cost model of the two routes, in milliseconds, chooses: the
+# host costs AUTO_HOST_COST_FIXED + AUTO_HOST_COST_PER_MATRIX * batch + AUTO_HOST_COST_PER_CUBE * batch * m^3 / P,
+# with P = min(threads, batch)^AUTO_HOST_PARALLEL_EXPONENT for batches of at least HOST_PARALLEL_MIN_BATCH matrices
+# (run in parallel) and 1 otherwise; the kernel costs max(floor, time * (m / size)^exponent) per launch (one entry
+# of AUTO_TRITON_COST per dtype), times (batch / AUTO_TRITON_BATCH_FILL)^AUTO_TRITON_BATCH_EXPONENT beyond that many
+# matrices. Fitted on an RTX 3070 and a 12-core CPU at 1 and 24 threads: 3 of 128 measured inputs (float32 and
+# float64, m from 8 to 512, batches from 1 to 256) take a route more than 5% slower than the other, by 0.12 ms in
+# total, all near ties.
+AUTO_HOST_COST_FIXED = 0.05
+AUTO_HOST_COST_PER_MATRIX = 6e-3
+AUTO_HOST_COST_PER_CUBE = {torch.float32: 4e-8, torch.float64: 6e-8}
+AUTO_HOST_PARALLEL_EXPONENT = 0.35
+AUTO_TRITON_COST = {torch.float32: (0.28, 0.95, 256, 2.0), torch.float64: (0.28, 0.98, 128, 2.5)}
+AUTO_TRITON_BATCH_FILL = 32
+AUTO_TRITON_BATCH_EXPONENT = 0.7
 # Batches with at least this many matrices run in parallel in the Rust kernel (its PARALLEL_BATCH_THRESHOLD).
 HOST_PARALLEL_MIN_BATCH = 8
 # Dtypes with a PyTorch LU factorization, which every path beyond the unrolled small kernel needs.
@@ -66,6 +69,10 @@ UPCAST_COMPLEX_DTYPE = torch.complex64
 SUPPORTED_DTYPES = LU_DTYPES + LOW_PRECISION_DTYPES
 # Dtypes whose CPU results _all_finite tests with NumPy (which has no bfloat16 or complex32).
 _NUMPY_DTYPES = (torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
+# Device results with at most this many Pfaffians are tested for finiteness on the host (see _all_finite).
+_HOST_FINITE_MAX_NUMEL = 2**16
+# The attribute where the host route keeps the host values of its device results (see RustPfaffianParlettReid).
+_HOST_VALUES_ATTRIBUTE = "_torch_pfaffian_host_values"
 
 
 def _check_dtype(function_name: str, dtype: torch.dtype) -> None:
@@ -193,9 +200,9 @@ def pfaffian(
     first, regardless of ``sign`` and device (``|Pf|`` for ``sign=False``); it is exact for every dtype
     and differentiable end-to-end. For larger matrices the Rust kernel runs on CPU (in real and complex
     precisions). A non-CPU (e.g. CUDA) input is computed by the same kernel on the host when it is small
-    (``batch * m^2 = matrix.numel() <= AUTO_HOST_MAX_BATCH_SQUARE``, or the bounds of
-    ``AUTO_HOST_MAX_BATCH_SQUARE_TRITON`` for the real inputs of the Triton kernel), since the device is slower
-    there: the matrix is copied to the host and the Pfaffian back, which synchronizes with the device, and the
+    (``batch * m^2 = matrix.numel() <= AUTO_HOST_MAX_BATCH_SQUARE``; for the real inputs of the Triton kernel, when
+    a cost model of both routes, which accounts for the host threads, estimates the host faster), since the device
+    is slower there: the matrix is copied to the host and the Pfaffian back, which synchronizes with the device, and the
     backward runs on the host for the smallest inputs and on the device otherwise. Larger inputs, and inputs while a
     CUDA graph is being captured, are routed to ``PfaffianParlettReid``, which runs natively on the input
     device without a host round-trip; in ``float32`` and ``float64``, with Triton installed, its elimination is
@@ -395,12 +402,18 @@ def _all_finite(result: torch.Tensor) -> bool:
     Whether every entry of a Pfaffian result is finite.
 
     :param result: The Pfaffians, of any shape.
-    :return: ``True`` when every entry is finite. A CPU result is tested by NumPy, which costs a microsecond
-        against the about 10 us of ``torch.isfinite(result).all()`` and its conversion to ``bool``.
+    :return: ``True`` when every entry is finite. A CPU result, or a small device result copied to the host, is
+        tested by NumPy, which costs a microsecond against the about 10 us of ``torch.isfinite(result).all()`` and
+        its conversion to ``bool`` on CPU (about 80 us on CUDA).
     :rtype: bool
     """
-    if result.device.type == "cpu" and result.dtype in _NUMPY_DTYPES:
-        return bool(np.isfinite(result.detach().resolve_conj().numpy()).all())
+    host_values = getattr(result, _HOST_VALUES_ATTRIBUTE, None)
+    if host_values is not None:  # computed through the host: its values are already there
+        return bool(np.isfinite(host_values).all())
+    if result.dtype in _NUMPY_DTYPES and (result.device.type == "cpu" or result.numel() <= _HOST_FINITE_MAX_NUMEL):
+        # A small device result is copied to the host (one transfer, which synchronizes like the device check would):
+        # about 16 us on CUDA, against about 80 us for isfinite, all and the conversion on the device.
+        return bool(np.isfinite(result.detach().cpu().resolve_conj().numpy()).all())
     return bool(torch.isfinite(result).all())
 
 
@@ -417,32 +430,55 @@ def _host_threads() -> int:
     return os.cpu_count() or 1
 
 
+def _host_cost(dtype: torch.dtype, dimension: int, batch: int) -> float:
+    """
+    Estimated milliseconds of the host route of a signed CUDA input (see ``AUTO_HOST_COST_FIXED``).
+
+    :param dtype: ``float32`` or ``float64``.
+    :param dimension: Matrix dimension ``m``.
+    :param batch: Number of matrices.
+    :return: The estimate.
+    :rtype: float
+    """
+    parallel = min(_host_threads(), batch) ** AUTO_HOST_PARALLEL_EXPONENT if batch >= HOST_PARALLEL_MIN_BATCH else 1.0
+    work = AUTO_HOST_COST_PER_CUBE[dtype] * batch * dimension**3 / parallel
+    return AUTO_HOST_COST_FIXED + AUTO_HOST_COST_PER_MATRIX * batch + work
+
+
+def _triton_cost(dtype: torch.dtype, dimension: int, batch: int) -> float:
+    """
+    Estimated milliseconds of the Triton kernel on a signed CUDA input (see ``AUTO_TRITON_COST``).
+
+    :param dtype: ``float32`` or ``float64``.
+    :param dimension: Matrix dimension ``m``.
+    :param batch: Number of matrices.
+    :return: The estimate.
+    :rtype: float
+    """
+    floor, time, size, exponent = AUTO_TRITON_COST[dtype]
+    launch = max(floor, time * (dimension / size) ** exponent)
+    return launch * max(1.0, batch / AUTO_TRITON_BATCH_FILL) ** AUTO_TRITON_BATCH_EXPONENT
+
+
 def _on_host(matrix: torch.Tensor) -> bool:
     """
     Whether a signed input on a non-CPU device is computed by the Rust kernel on the host.
 
     :param matrix: Skew-symmetric matrix of shape ``(..., m, m)`` on a non-CPU device.
-    :return: ``True`` when ``batch * m^2`` is at most ``AUTO_HOST_MAX_BATCH_SQUARE``, or, when the Triton kernel
-        takes the input, its bound per dtype (per host thread for parallel batches, see
-        ``AUTO_HOST_MAX_BATCH_SQUARE_TRITON``; never for at least ``AUTO_TRITON_SMALL_MIN_BATCH`` matrices of size
-        at most ``AUTO_TRITON_SMALL_MAX_DIMENSION``), and no CUDA graph is being captured (a capture cannot copy to
-        the host).
+    :return: ``True`` when no CUDA graph is being captured (a capture cannot copy to the host) and, when the Triton
+        kernel takes the input, the cost model estimates the host faster (see :func:`_host_cost`), otherwise when
+        ``batch * m^2`` is at most ``AUTO_HOST_MAX_BATCH_SQUARE``.
     :rtype: bool
     """
-    limit = AUTO_HOST_MAX_BATCH_SQUARE
+    capturing = matrix.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
     if ParlettReidTriton.supports(matrix):
         dimension = matrix.shape[-1]
         batch = matrix.numel() // (dimension * dimension)
-        if dimension <= AUTO_TRITON_SMALL_MAX_DIMENSION and batch >= AUTO_TRITON_SMALL_MIN_BATCH:
-            return False
-        if batch >= HOST_PARALLEL_MIN_BATCH:
-            per_thread, thread_cap = AUTO_HOST_MAX_BATCH_SQUARE_TRITON[matrix.dtype]
-            limit = per_thread * min(_host_threads(), thread_cap)
-        else:
-            limit = AUTO_HOST_MAX_BATCH_SQUARE_TRITON_SERIAL[matrix.dtype]
-    if matrix.numel() > limit:  # batch * m^2
-        return False
-    return not (matrix.device.type == "cuda" and torch.cuda.is_current_stream_capturing())
+        return not capturing and _host_cost(matrix.dtype, dimension, batch) < _triton_cost(
+            matrix.dtype, dimension, batch
+        )
+    limit = AUTO_HOST_MAX_BATCH_SQUARE
+    return not capturing and matrix.numel() <= limit  # batch * m^2
 
 
 def _pfaffian_upcast(

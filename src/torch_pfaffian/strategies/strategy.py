@@ -51,6 +51,8 @@ class PfaffianStrategy(torch.autograd.Function):
     # up to NATIVE_INVERSE_PARALLEL_MAX_SIZE when the batch of at least NATIVE_INVERSE_PARALLEL_MIN_BATCH matrices
     # runs in parallel (k = 128, batch 8: 1.5 ms against 3.0 ms); LAPACK wins beyond (measured on 12 cores).
     NATIVE_INVERSE_MAX_SIZE = 96
+    # Device tensors up to this size are copied to the host with tensor.cpu() (see _host_array).
+    HOST_COPY_SMALL_BYTES = 2**16
     NATIVE_INVERSE_PARALLEL_MAX_SIZE = 128
     NATIVE_INVERSE_PARALLEL_MIN_BATCH = 8
 
@@ -320,6 +322,10 @@ class PfaffianStrategy(torch.autograd.Function):
         tensor = tensor.detach()
         if tensor.device.type == "cpu":
             return tensor.contiguous().resolve_conj().numpy()
+        if (
+            tensor.numel() * tensor.element_size() <= PfaffianStrategy.HOST_COPY_SMALL_BYTES
+        ):  # pragma: no cover - needs a GPU
+            return tensor.resolve_conj().cpu().numpy()  # a few pages: cheaper than allocating through NumPy
         host = torch.from_numpy(  # pragma: no cover - needs a GPU
             np.empty(tuple(tensor.shape), dtype=torch.empty(0, dtype=tensor.dtype).numpy().dtype)
         )
