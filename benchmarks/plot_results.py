@@ -26,6 +26,11 @@ PANEL_SIZE = (3.6, 2.8)  # inches
 # one page, the resolution, so that it stays on the log scale.
 MEMORY_FLOOR_BYTES = 4096
 METRICS = (("seconds", "time per matrix"), ("peak_memory_bytes", "peak memory per call"))
+# The overview shows packages, not variants; each has a marker shape too, since its colors are not all pairwise
+# distinct enough for a scatter plot (color is never the only cue).
+PACKAGE_MARKERS = {"torchpfaffian": "o", "pfapack (C)": "s", "lrux": "^", "torchpfaff": "D", "pfapack (Python)": "v"}
+ITEM_SIZES = {"float32": 4, "float64": 8, "complex64": 8, "complex128": 16}
+OVERVIEW_METRICS = (("call_seconds", "time per call"), ("peak_memory_bytes", "peak memory per call"))
 
 
 class ResultsPlot:
@@ -39,7 +44,24 @@ class ResultsPlot:
     the time per matrix above and the peak memory of one call of the whole batch below, on log scales. The color
     is the library, and the line style the device (solid on CPU, dashed on CUDA). A method without a memory
     record (lrux on CUDA, results saved before memory was recorded) has no memory line.
+
+    ``--overview`` adds one figure with every measurement of every file given: the time and the peak memory of
+    one call against the size of its input (the batch of matrices, or of inverses for ``--ratios``, in bytes),
+    which is defined the same way for every operation, dtype and batch size. The color and the marker shape are the
+    package (TorchPfaffian's compiled variant and its ``new Pfaffian`` baseline count as TorchPfaffian), filled on
+    CPU and hollow on CUDA. A dotted line marks the memory equal to the input size.
     """
+
+    @staticmethod
+    def package(library: str) -> str:
+        """
+        Package of a library returned by :meth:`describe`.
+
+        :param library: A library, such as ``"torchpfaffian, compiled"``.
+        :return: Its package, such as ``"torchpfaffian"``.
+        :rtype: str
+        """
+        return library.removesuffix(COMPILED_SUFFIX).removesuffix(f", {NEW_PFAFFIAN}")
 
     @staticmethod
     def describe(method: str) -> tuple[str, str, str]:
@@ -210,6 +232,107 @@ class ResultsPlot:
         return figure
 
     @staticmethod
+    def overview(measurements: Sequence[Measurement], header: str):
+        """
+        One figure with every measurement: time and peak memory per call against the input size.
+
+        :param measurements: Measurements of any number of runs, full-Pfaffian and ``--ratios`` alike.
+        :param header: Description of the libraries and the machine, printed under the figure.
+        :return: The figure.
+        :rtype: matplotlib.figure.Figure
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+        import seaborn as sns
+        from matplotlib.lines import Line2D
+
+        sns.set_theme(style="whitegrid", context="notebook", rc={"grid.color": "#e4e3df", "axes.edgecolor": "#c3c2b7"})
+        frame = ResultsPlot._frame(measurements)
+        frame["package"] = frame["library"].map(ResultsPlot.package)
+        frame["input_bytes"] = [item.dimension**2 * item.batch * ITEM_SIZES.get(item.dtype, 8) for item in measurements]
+        frame["call_seconds"] = [item.seconds for item in measurements]
+        packages = [name for name in PACKAGE_MARKERS if name in set(frame["package"])]
+        packages += sorted(set(frame["package"]) - set(packages))
+        figure, axes = plt.subplots(1, 2, figsize=(13, 5.2))
+        for axis, (metric, label) in zip(axes, OVERVIEW_METRICS):
+            for (package, device), points in frame.dropna(subset=[metric]).groupby(["package", "device"]):
+                color = LIBRARY_COLORS.get(package, "#898781")
+                axis.scatter(
+                    points["input_bytes"],
+                    points[metric],
+                    s=36,
+                    marker=PACKAGE_MARKERS.get(package, "o"),
+                    facecolors=color if device == "CPU" else "white",
+                    edgecolors=color if device == "CUDA" else "white",
+                    linewidths=1.4 if device == "CUDA" else 0.6,
+                    alpha=0.85,
+                    zorder=3,
+                )
+            axis.set_xscale("log")
+            axis.set_yscale("log")
+            axis.xaxis.set_major_formatter(ticker.FuncFormatter(ResultsPlot.format_bytes))
+            formatter = ResultsPlot.format_seconds if metric == "call_seconds" else ResultsPlot.format_bytes
+            axis.yaxis.set_major_formatter(ticker.FuncFormatter(formatter))
+            axis.set_xlabel("input size (matrices of the batch)")
+            axis.set_ylabel(label)
+            axis.set_title(label.capitalize(), fontsize="medium")
+            axis.tick_params(labelsize="small")
+        sizes = frame["input_bytes"]
+        guide = [sizes.min(), sizes.max()]
+        axes[1].plot(guide, guide, color="#898781", linestyle=":", linewidth=1.5, zorder=2)
+        axes[1].annotate(
+            "memory = input size",
+            (guide[0], guide[0]),
+            xytext=(8, -4),
+            textcoords="offset points",
+            ha="left",
+            va="top",
+            fontsize="small",
+            color="#52514e",
+        )
+        handles = [
+            Line2D(
+                [],
+                [],
+                linestyle="",
+                marker=PACKAGE_MARKERS.get(name, "o"),
+                markersize=7,
+                markerfacecolor=LIBRARY_COLORS.get(name, "#898781"),
+                markeredgecolor="white",
+                label=name,
+            )
+            for name in packages
+        ]
+        handles += [
+            Line2D(
+                [],
+                [],
+                linestyle="",
+                marker="o",
+                markersize=7,
+                markerfacecolor="#52514e",
+                markeredgecolor="white",
+                label="CPU (filled)",
+            ),
+            Line2D(
+                [],
+                [],
+                linestyle="",
+                marker="o",
+                markersize=7,
+                markerfacecolor="white",
+                markeredgecolor="#52514e",
+                markeredgewidth=1.4,
+                label="CUDA (hollow)",
+            ),
+        ]
+        figure.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=len(handles), frameon=False)
+        figure.suptitle("Overview: every benchmark point", y=1.0, fontsize="large", fontweight="bold")
+        figure.text(0.0, -0.01, "\n".join(textwrap.wrap(header, 180)), fontsize="x-small", color="#52514e", va="top")
+        figure.tight_layout(rect=(0, 0, 1, 0.9))
+        return figure
+
+    @staticmethod
     def main(arguments: Sequence[str] | None = None) -> None:
         """
         Command line: plot each results file given.
@@ -219,10 +342,22 @@ class ResultsPlot:
         parser = argparse.ArgumentParser(description=(ResultsPlot.__doc__ or "").strip().split("\n\n")[0])
         parser.add_argument("results", type=Path, nargs="+", help="JSON files written by library_comparison.py")
         parser.add_argument("--output-directory", type=Path, default=None, help="next to each results file by default")
+        parser.add_argument("--overview", action="store_true", help="also plot every point of every file in one figure")
         parsed = parser.parse_args(arguments)
         for path in parsed.results:
             for output in ResultsPlot.plot_file(path, parsed.output_directory):
                 print(output)
+        if parsed.overview:
+            import matplotlib.pyplot as plt
+
+            runs = [load_results(path) for path in parsed.results]
+            headers = list(dict.fromkeys(header for header, _ in runs))
+            figure = ResultsPlot.overview([item for _, items in runs for item in items], "; ".join(headers))
+            directory = parsed.results[0].parent if parsed.output_directory is None else parsed.output_directory
+            output = directory / "overview.png"
+            figure.savefig(output, dpi=150, bbox_inches="tight")
+            plt.close(figure)
+            print(output)
 
     @staticmethod
     def _frame(measurements: Sequence[Measurement]):

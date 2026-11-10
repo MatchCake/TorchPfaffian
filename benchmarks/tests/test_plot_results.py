@@ -93,3 +93,24 @@ class TestResultsPlot:
         figure = ResultsPlot.figure(measurements[:2], "header", "title")
         texts = [text.get_text() for axis in figure.axes for text in axis.texts]
         assert texts == ["not recorded"]
+
+    def test_package_merges_the_variants(self):
+        assert ResultsPlot.package("torchpfaffian, compiled") == "torchpfaffian"
+        assert ResultsPlot.package("torchpfaffian, new Pfaffian") == "torchpfaffian"
+        assert ResultsPlot.package("pfapack (C)") == "pfapack (C)"
+
+    def test_overview_puts_every_run_in_one_figure(self, tmp_path, capsys):
+        full = self._measurements(["pfapack (C)", "torchpfaffian (CUDA)", "unknown"], dtypes=("float64", "complex128"))
+        ratios = self._measurements(["torchpfaffian ratio, compiled", "lrux ratio (CUDA)"], update="row")
+        ratios[0].peak_memory_bytes = float("nan")
+        paths = [tmp_path / "libraries.json", tmp_path / "ratios.json"]
+        save_results(paths[0], "header", full)
+        save_results(paths[1], "header", ratios)
+        ResultsPlot.main([str(path) for path in paths] + ["--overview"])
+        assert capsys.readouterr().out.split()[-1] == str(tmp_path / "overview.png")
+        assert (tmp_path / "overview.png").stat().st_size > 0
+        figure = ResultsPlot.overview(full + ratios, "header")
+        time_axis, memory_axis = figure.axes
+        assert sum(len(collection.get_offsets()) for collection in time_axis.collections) == len(full + ratios)
+        assert sum(len(collection.get_offsets()) for collection in memory_axis.collections) == len(full + ratios) - 1
+        assert [text.get_text() for text in memory_axis.texts] == ["memory = input size"]

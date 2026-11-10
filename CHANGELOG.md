@@ -26,7 +26,8 @@ changes the package's behaviour, API, documentation or packaging.
   updates run through `torch.compile` (validation stays eager), which halves the inverse updates on small
   inputs on CPU and CUDA after a one-time compilation (#35).
 - `benchmarks/library_comparison.py` records the peak memory of each call next to its time, and
-  `benchmarks/plot_results.py` plots both against the matrix size, one panel per comparison.
+  `benchmarks/plot_results.py` plots both against the matrix size, one panel per comparison, and every point
+  against the input size in one overview (`--overview`).
 
 ### Changed
 

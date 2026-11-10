@@ -151,6 +151,13 @@ the library, and the line style the device. The figures are saved as PNGs next t
 ~/.venvs/pfaffian-libraries/bin/python benchmarks/plot_results.py benchmarks/results/ratios-*.json --output-directory plots
 ```
 
+`--overview` also saves `overview.png`, one figure with every point of every file given: the time and the peak
+memory of one call against the size of its input in bytes (the batch of matrices, or of inverses for `--ratios`),
+the one axis that means the same for every operation, dtype and batch size. Each package has its own color and
+marker shape, filled on CPU and hollow on CUDA, and a dotted line marks the memory equal to the input size.
+torch's CUDA allocator counts cuBLAS's workspace (about 8 MiB) in every call that multiplies matrices, so small
+CUDA inputs read about 8 MB.
+
 ## Adding cases
 
 Add a matrix family to `FAMILIES` in `cases.py` (for example the input of a bug you just fixed), or a size to
