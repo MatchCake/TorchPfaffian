@@ -472,6 +472,66 @@ class TestTorchPfaffian:
         assert torch.isfinite(matrix.grad).all()
         assert torch.any(matrix.grad != 0)
 
+    @pytest.mark.parametrize(
+        "dtype, coefficient", [(torch.float64, 1e100), (torch.complex128, 1e100), (torch.complex64, 1e12)]
+    )
+    def test_pfaffian_overflow_recovery_keeps_the_other_elements_gradient(self, dtype, coefficient):
+        # Regression (#28): one overflowing element made the recovery recompute the whole batch in the log domain,
+        # whose gradient dropped the complex phase's derivative for every element.
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        noise = torch.randn(2, 8, 8, dtype=dtype, generator=generator)
+        matrix = noise - noise.mT
+        matrix[1] = _block_diagonal_skew([coefficient] * 4).to(dtype)  # Pf = coefficient^4 overflows
+        batch = matrix.clone().requires_grad_(True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # the overflowing Pfaffian is genuinely out of range
+            pfaffian(batch).real.sum().backward()
+        alone = matrix[:1].clone().requires_grad_(True)
+        pfaffian(alone).real.sum().backward()
+        assert batch.grad is not None and alone.grad is not None
+        torch.testing.assert_close(
+            batch.grad[0], alone.grad[0], atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    def test_pfaffian_overflow_recovery_gradient_is_the_full_complex_derivative(self):
+        # A complex element whose linear product overflows while its Pfaffian is finite: its recovered gradient
+        # is 0.5 * conj(Pf A^{-T}), the phase's derivative included.
+        angles = torch.linspace(0.3, 1.1, 8, dtype=torch.float64)
+        phases = torch.exp(1j * angles)
+        magnitudes = torch.tensor([1e200, 1e200] + [1e-29] * 6, dtype=torch.float64)  # Pf about 1e226
+        matrix = _block_diagonal_skew([1.0] * 8).to(torch.complex128)
+        for index, coefficient in enumerate(magnitudes * phases):
+            matrix[2 * index, 2 * index + 1], matrix[2 * index + 1, 2 * index] = coefficient, -coefficient
+        assert not torch.isfinite(pfaffian(matrix, check_finite=False))  # the linear domain overflows
+        matrix.requires_grad_(True)
+        result = pfaffian(matrix)
+        result.real.backward()
+        # In the log domain: a plain product overflows when its order multiplies the two 1e200 first (arm64).
+        expected_value = torch.exp(torch.log(magnitudes).sum()) * torch.exp(1j * angles.sum())
+        torch.testing.assert_close(
+            result.detach(), expected_value, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+        expected_gradient = 0.5 * (expected_value * torch.linalg.inv(matrix.detach()).mT).conj()
+        assert matrix.grad is not None
+        torch.testing.assert_close(
+            matrix.grad, expected_gradient, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+        )
+
+    def test_pfaffian_overflow_recovery_keeps_the_adjugate_gradient_of_singular_elements(self):
+        # A singular element next to an overflowing one keeps the exact gradient of the linear domain (the
+        # adjugate), which the log domain would set to zero.
+        singular = _block_diagonal_skew([2.0, 3.0, 5.0, 0.0])  # rank 6: Pf = 0 with a nonzero gradient
+        matrix = torch.stack([singular, _block_diagonal_skew([1e100] * 4)])
+        batch = matrix.clone().requires_grad_(True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            pfaffian(batch).sum().backward()
+        alone = singular.clone().requires_grad_(True)
+        pfaffian(alone).backward()
+        assert batch.grad is not None and alone.grad is not None
+        assert torch.any(alone.grad != 0)
+        torch.testing.assert_close(batch.grad[0], alone.grad, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+
     def test_pfaffian_auto_recovers_magnitude_transient_overflow(self):
         # The magnitude path (sign=False) recovers overflow the same way, via the log-domain magnitude.
         matrix = _block_diagonal_skew([1e200, 1e200, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29, 1e-29])
