@@ -68,7 +68,7 @@ class RustPfaffianParlettReid(PfaffianStrategy):
         array = RustPfaffianParlettReid._host_array(flat.to(working_dtype))
         result = kernel(array)  # (batch,) in working_dtype
         pfaffian = torch.from_numpy(result).to(dtype=matrix.dtype, device=matrix.device).reshape(matrix.shape[:-2])
-        if pfaffian.device.type != "cpu":
+        if pfaffian.device.type != "cpu":  # pragma: no cover - needs a GPU
             setattr(pfaffian, RustPfaffianParlettReid.HOST_VALUES_ATTRIBUTE, result)
         return pfaffian
 
@@ -161,7 +161,7 @@ class RustPfaffianWithInverse(torch.autograd.Function):
         ctx.native = (host.reshape(matrix.shape), values, inverse, flagged)
         ctx.template = None
         batch_shape = matrix.shape[:-2]
-        if matrix.device.type != "cpu" and not (flagged | (values == 0)).any():
+        if matrix.device.type != "cpu" and not (flagged | (values == 0)).any():  # pragma: no cover - needs a GPU
             # A device input: the gradient is grad * 0.5 * conj(pf(A) A^{-1})^T, so that template goes to the device
             # with the Pfaffians, in one transfer, and the backward is one multiplication there instead of a round
             # trip through the host (two transfers and a synchronization).
