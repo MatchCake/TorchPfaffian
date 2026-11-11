@@ -48,13 +48,25 @@ function already takes any leading batch shape.
 Thread count and MKL
 --------------------
 
-On some MKL builds, any call to ``torch.set_num_threads`` (including ``torch.utils.benchmark.Timer``,
-which calls it) makes PyTorch's batched LU return invalid pivots for large batched matrices
-(``m >= 256``). Determinants are then wrong without an error, and inverses raise
-``RuntimeError: Pivots given to lu_solve must all be greater or equal to 1``. The bug is in PyTorch or
-MKL and affects every determinant- and inverse-based path. Set the thread count with the
-``OMP_NUM_THREADS`` and ``MKL_NUM_THREADS`` environment variables before starting Python instead. See
-issue `#23 <https://github.com/MatchCake/TorchPfaffian/issues/23>`_.
+On PyTorch's MKL builds, a call to ``torch.set_num_threads(n)`` with ``n >= 2`` (including through
+``torch.utils.benchmark.Timer``, which calls it) corrupts the batched LU factorizations on CPU for the rest
+of the process: from about ``m = 150``, every matrix of a batch of two or more that needs row swaps comes out
+wrong. PyTorch splits the batch over its threads, each calling MKL's ``getrf``, which then starts its own
+team of ``n`` threads, and the nested teams conflict. Determinants and inverses are mostly wrong without an
+error, and sometimes inverses raise ``RuntimeError: Pivots given to lu_solve must all be greater or equal to
+1``. The bug is in PyTorch and MKL (`pytorch/pytorch#142815 <https://github.com/pytorch/pytorch/issues/142815>`_,
+`#141358 <https://github.com/pytorch/pytorch/issues/141358>`_).
+
+TorchPfaffian's determinant- and inverse-based paths detect it and raise a ``RuntimeError`` instead of
+returning wrong values: for a batched LU of at least two CPU matrices of size ``m >= 96`` with more than one
+thread, :class:`~torch_pfaffian.kernels.checked_linalg.CheckedLinalg` factors a small probe the same way and
+verifies it. The verdict is cached per probe size (``min(m, 256)``), dtype and thread count, so the probe runs
+once for each (about 1 ms) and later calls only look the verdict up. A later ``torch.set_num_threads`` with
+another count is detected, but one that sets the current count again, which also corrupts the factorizations,
+is not seen once a verdict is cached. Set the thread count with the ``OMP_NUM_THREADS`` environment variable
+before starting Python instead of calling ``torch.set_num_threads``, or call ``torch.set_num_threads(1)``. See
+issue `#23 <https://github.com/MatchCake/TorchPfaffian/issues/23>`_; the check is to be removed once PyTorch
+fixes the bug (`#48 <https://github.com/MatchCake/TorchPfaffian/issues/48>`_).
 
 Derivatives at singular matrices
 --------------------------------

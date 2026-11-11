@@ -2,6 +2,7 @@ from typing import cast
 
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from .strategy import PfaffianStrategy
 
 
@@ -86,7 +87,7 @@ class PfaffianMaskedMagnitude(PfaffianStrategy):
         if matrix.shape[-1] % 2 != 0:
             floor = torch.full_like(matrix[..., 0, 0].real, epsilon).sqrt()  # det of an odd skew matrix is 0
             return floor, torch.ones_like(floor, dtype=torch.bool)
-        determinant_magnitude = torch.abs(torch.linalg.det(matrix))
+        determinant_magnitude = torch.abs(CheckedLinalg.det(matrix))
         magnitude = torch.sqrt(torch.clamp(determinant_magnitude, min=epsilon))
         clamped = ~(determinant_magnitude > epsilon)  # also True where the determinant is NaN
         return magnitude, clamped
@@ -118,7 +119,7 @@ class PfaffianMaskedMagnitude(PfaffianStrategy):
         threshold = PfaffianMaskedMagnitude.ROUNDOFF_RCOND_SCALE * epsilon
         spectral_threshold = PfaffianMaskedMagnitude.ROUNDOFF_SPECTRAL_SCALE * epsilon
         with torch.no_grad():  # the mask is not differentiable
-            inverse, info = torch.linalg.inv_ex(matrix)
+            inverse, info = CheckedLinalg.inv_ex(matrix)
             rcond = 1.0 / (torch.linalg.matrix_norm(matrix, ord=1) * torch.linalg.matrix_norm(inverse, ord=1))
             # A non-finite magnitude (overflowed det, NaN input) is masked too, so 0 * inf never leaks a NaN.
             invalid = (info != 0) | ~torch.isfinite(rcond) | ~torch.isfinite(magnitude) | clamped
@@ -135,7 +136,7 @@ class PfaffianMaskedMagnitude(PfaffianStrategy):
         if torch.is_grad_enabled() and matrix.requires_grad:
             # Double backward: invert the identity in place of the masked elements so the derivative of
             # the inverse stays finite there (it is multiplied by zero, and 0 * inf would give NaN).
-            inverse, _ = torch.linalg.inv_ex(torch.where(masked[..., None, None], identity, matrix))
+            inverse, _ = CheckedLinalg.inv_ex(torch.where(masked[..., None, None], identity, matrix))
         coefficient = (0.5 * grad_output * magnitude).to(matrix.dtype)  # (...,)
         grad = coefficient[..., None, None] * inverse.transpose(-1, -2).conj()  # (..., m, m)
         return torch.where(masked[..., None, None], torch.zeros_like(grad), grad), None

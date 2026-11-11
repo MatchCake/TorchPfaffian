@@ -3,6 +3,8 @@ from typing import cast
 
 import torch
 
+from .checked_linalg import CheckedLinalg
+
 
 class LogMagnitudePfaffian(torch.autograd.Function):
     r"""
@@ -21,7 +23,7 @@ class LogMagnitudePfaffian(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx: torch.autograd.function.FunctionCtx, matrix: torch.Tensor) -> torch.Tensor:
-        sign, log_abs_det = torch.linalg.slogdet(matrix)
+        sign, log_abs_det = CheckedLinalg.slogdet(matrix)
         ctx.save_for_backward(matrix, sign == 0)  # sign == 0 marks exactly-singular (det == 0) elements
         return 0.5 * log_abs_det
 
@@ -32,7 +34,7 @@ class LogMagnitudePfaffian(torch.autograd.Function):
             return None
         identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
         safe_matrix = torch.where(singular[..., None, None], identity, matrix)  # invertible at singular elements
-        inverse, _ = torch.linalg.inv_ex(safe_matrix)  # non-raising; safe_matrix is never singular
+        inverse, _ = CheckedLinalg.inv_ex(safe_matrix)  # non-raising; safe_matrix is never singular
         grad = 0.5 * grad_output[..., None, None] * inverse.conj().transpose(-1, -2)
         return torch.where(singular[..., None, None], torch.zeros_like(grad), grad)
 

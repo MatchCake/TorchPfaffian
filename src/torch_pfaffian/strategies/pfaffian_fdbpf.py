@@ -2,6 +2,7 @@ from typing import cast
 
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from .strategy import PfaffianStrategy
 
 
@@ -18,7 +19,7 @@ class PfaffianFDBPf(PfaffianStrategy):
         _2n = matrix.shape[-1]
         if _2n % 2 != 0:
             return torch.zeros_like(matrix[..., 0, 0].real)  # the magnitude is real, also for complex input
-        det = torch.linalg.det(matrix)
+        det = CheckedLinalg.det(matrix)
         pf = torch.sqrt(torch.clamp(torch.abs(det), min=PfaffianFDBPf.EPSILON))
         return pf
 
@@ -61,15 +62,15 @@ class PfaffianFDBPf(PfaffianStrategy):
             # assign them an exactly zero gradient, so no host branch runs.
             identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
             safe_matrix = torch.where(singular[..., None, None], identity, matrix)
-            inverse, _ = torch.linalg.inv_ex(safe_matrix)
+            inverse, _ = CheckedLinalg.inv_ex(safe_matrix)
             grad = PfaffianFDBPf._magnitude_grad(inverse, pf, grad_output)
             return torch.where(singular[..., None, None], torch.zeros_like(grad), grad)
         if bool(singular.any()):
             identity = torch.eye(dimension, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
             safe_matrix = torch.where(singular[..., None, None], identity, matrix)
-            inverse = torch.linalg.inv(safe_matrix)
+            inverse = CheckedLinalg.inv(safe_matrix)
         else:
-            inverse = torch.linalg.inv(matrix)
+            inverse = CheckedLinalg.inv(matrix)
         return PfaffianFDBPf._magnitude_grad(inverse, pf, grad_output)
 
     @staticmethod

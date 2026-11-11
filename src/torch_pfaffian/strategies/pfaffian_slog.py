@@ -2,6 +2,7 @@ from typing import Any
 
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from ..kernels.parlett_reid_slog import parlett_reid_slog
 
 
@@ -58,7 +59,7 @@ class SlogPfaffianStrategy(torch.autograd.Function):
         safe_matrix = torch.where(singular[..., None, None], identity, matrix)
         # inv_ex never raises: an element left singular (a non-finite entry, which phase == 0 does not flag)
         # gets a non-finite gradient instead of failing the whole batch.
-        inverse, _ = torch.linalg.inv_ex(safe_matrix)
+        inverse, _ = CheckedLinalg.inv_ex(safe_matrix)
         inverse_transposed_conj = inverse.conj().transpose(-1, -2)
         grad = 0.5 * grad_log_abs[..., None, None] * inverse_transposed_conj
         return torch.where(singular[..., None, None], torch.zeros_like(grad), grad)
