@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import torch
 
 # The Rust inverse of _flagged_inverse, per dtype; empty when the extension is not built.
@@ -45,12 +46,14 @@ class PfaffianStrategy(torch.autograd.Function):
     # Elements per chunk (k * pairs * (n - 2)^2) of the batched minor Pfaffians: bounds the memory to 4-16 MiB
     # per chunk, which also measured as fast as larger chunks (cache-friendly).
     MINOR_CHUNK_ELEMENTS = 1 << 20
-    # The Rust inverse of _flagged_inverse (unblocked LU, one thread per matrix) beats PyTorch's LAPACK path up
-    # to k = NATIVE_INVERSE_MAX_SIZE on one matrix (k = 32: 63 us against 173 us), and up to
-    # NATIVE_INVERSE_PARALLEL_MAX_SIZE when the batch of at least NATIVE_INVERSE_PARALLEL_MIN_BATCH matrices
-    # runs in parallel (k = 64, batch 8: 0.64 ms against 0.98 ms); LAPACK wins beyond (measured on 12 cores).
-    NATIVE_INVERSE_MAX_SIZE = 40
-    NATIVE_INVERSE_PARALLEL_MAX_SIZE = 96
+    # The Rust inverse of _flagged_inverse (Gauss-Jordan, one thread per matrix) beats PyTorch's LAPACK path up to
+    # k = NATIVE_INVERSE_MAX_SIZE on one matrix (k = 32: 18 us against 173 us; k = 96: 321 us against 341 us), and
+    # up to NATIVE_INVERSE_PARALLEL_MAX_SIZE when the batch of at least NATIVE_INVERSE_PARALLEL_MIN_BATCH matrices
+    # runs in parallel (k = 128, batch 8: 1.5 ms against 3.0 ms); LAPACK wins beyond (measured on 12 cores).
+    NATIVE_INVERSE_MAX_SIZE = 96
+    # Device tensors up to this size are copied to the host with tensor.cpu() (see _host_array).
+    HOST_COPY_SMALL_BYTES = 2**16
+    NATIVE_INVERSE_PARALLEL_MAX_SIZE = 128
     NATIVE_INVERSE_PARALLEL_MIN_BATCH = 8
 
     @staticmethod
@@ -257,19 +260,77 @@ class PfaffianStrategy(torch.autograd.Function):
             return None
         inverse, rank_flag, residual_flag = native
         values = pfaffian.detach().resolve_conj().reshape(-1).numpy()
-        weights = grad_output.detach().expand_as(pfaffian).resolve_conj().reshape(-1).numpy()
-        singular = rank_flag | residual_flag | (values == 0)  # pf == 0 also catches an underflowed pf
-        adjugate = values[:, None, None] * inverse  # pf(A) A^{-1}; replaced where singular
-        adjugate[singular] = 0
+        return cls._gradient_from_inverse(matrix, values, grad_output, inverse, rank_flag | residual_flag)
+
+    @classmethod
+    def _gradient_from_inverse(
+        cls, matrix: torch.Tensor, values: Any, grad_output: torch.Tensor, inverse: Any, flagged: Any
+    ) -> torch.Tensor:
+        """
+        The gradient of :meth:`pfaffian_grad_matrix` from a native inverse and its flags, in NumPy.
+
+        :param matrix: The input matrix of shape ``(..., n, n)``, on CPU.
+        :param values: The forward Pfaffians, as a NumPy array of shape ``(batch,)``.
+        :param grad_output: Gradient of the output with respect to the loss, broadcastable to ``(...,)``.
+        :param inverse: The inverses, as a NumPy array of shape ``(batch, n, n)`` (the identity where flagged).
+        :param flagged: The singularity flags (rank or residual), as a NumPy boolean array of shape ``(batch,)``.
+        :return: The gradient, of shape ``(..., n, n)``.
+        :rtype: torch.Tensor
+        """
+        weight_tensor = grad_output.detach()
+        if weight_tensor.shape != matrix.shape[:-2]:
+            weight_tensor = weight_tensor.expand(matrix.shape[:-2])
+        weights = weight_tensor.resolve_conj().reshape(-1).numpy()
+        complex_input = inverse.dtype.kind == "c"
+        # 0.5 * w * conj(pf(A) A^{-1})^T, as one scaled transpose of the inverse (the common, regular case).
+        scale = 0.5 * weights * (values.conj() if complex_input else values)
+        transposed = inverse.transpose(0, 2, 1)
+        if complex_input:
+            transposed = transposed.conj()
+        singular = flagged | (values == 0)  # pf == 0 also catches an underflowed pf
+        if not singular.any():
+            gradient = (scale.astype(inverse.dtype, copy=False)[:, None, None] * transposed).astype(
+                inverse.dtype, copy=False
+            )
+            return torch.from_numpy(gradient).reshape(matrix.shape)
+        gradient = (np.where(singular, 0, scale).astype(inverse.dtype)[:, None, None] * transposed).astype(
+            inverse.dtype, copy=False
+        )
         exact = singular & (weights != 0)  # elements needing the minor adjugate
         if exact.any():
             exact_index = torch.from_numpy(exact.nonzero()[0])
             dimension = matrix.shape[-1]
             with torch.no_grad():
-                flagged = matrix.detach().reshape(-1, dimension, dimension).index_select(0, exact_index)
-                adjugate[exact] = cls._singular_pfaffian_adjugate(flagged).to(matrix.dtype).numpy()
-        gradient = 0.5 * weights[:, None, None] * adjugate.conj().transpose(0, 2, 1)
-        return torch.from_numpy(gradient.astype(adjugate.dtype, copy=False)).reshape(matrix.shape)
+                matrices = matrix.detach().reshape(-1, dimension, dimension).index_select(0, exact_index)
+                adjugate = cls._singular_pfaffian_adjugate(matrices).to(matrix.dtype).numpy()
+            gradient[exact] = 0.5 * weights[exact][:, None, None] * adjugate.conj().transpose(0, 2, 1)
+        return torch.from_numpy(gradient).reshape(matrix.shape)
+
+    @staticmethod
+    def _host_array(tensor: torch.Tensor) -> Any:
+        """
+        A C-contiguous NumPy array of ``tensor`` on the host, copied into NumPy's memory when it is on a device.
+
+        ``tensor.cpu()`` lands in fresh torch memory that the GPU driver may write by direct memory access without
+        mapping its pages for the CPU; the first CPU read then takes a page fault per 4 KiB (2048 for 8 MiB, about
+        8 ms with the copy). NumPy's allocation of a large array asks for transparent huge pages, mapped up front.
+
+        :param tensor: Any tensor; it is detached, made C-contiguous and its conjugation resolved.
+        :return: The array, sharing the memory of a contiguous CPU ``tensor``.
+        :rtype: numpy.ndarray
+        """
+        tensor = tensor.detach()
+        if tensor.device.type == "cpu":
+            return tensor.contiguous().resolve_conj().numpy()
+        if (
+            tensor.numel() * tensor.element_size() <= PfaffianStrategy.HOST_COPY_SMALL_BYTES
+        ):  # pragma: no cover - needs a GPU
+            return tensor.resolve_conj().cpu().numpy()  # a few pages: cheaper than allocating through NumPy
+        host = torch.from_numpy(  # pragma: no cover - needs a GPU
+            np.empty(tuple(tensor.shape), dtype=torch.empty(0, dtype=tensor.dtype).numpy().dtype)
+        )
+        host.copy_(tensor.resolve_conj())  # pragma: no cover - needs a GPU
+        return host.numpy()  # pragma: no cover - needs a GPU
 
     @classmethod
     def _round_off_inverse(cls, matrix: torch.Tensor, pfaffian: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

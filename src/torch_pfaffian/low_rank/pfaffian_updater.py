@@ -33,9 +33,11 @@ class PfaffianUpdater:
     :class:`~torch_pfaffian.low_rank.CompiledLowRankPfaffian`): a few seconds of compilation on the first steps,
     then less per-call overhead on small matrices.
 
-    On CPU without a graph to build, small inverses (at most ``IMMEDIATE_MAX_NUMEL`` entries) are updated at
-    once by the Rust kernels of :class:`~torch_pfaffian.low_rank.LowRankPfaffian` instead of delaying the
-    updates, which is faster there; :attr:`delay` then stays 0. The results are the same up to round-off.
+    On CPU without a graph to build, accepted moves are applied to the inverse at once, in place, by the Rust
+    kernels of :class:`~torch_pfaffian.low_rank.LowRankPfaffian` instead of being delayed, which is faster;
+    :attr:`delay` then stays 0. The results are the same up to round-off. The updater copies an inverse it did not
+    compute (:meth:`from_inverse`) or that it returned (:attr:`inverse`) before updating it, so tensors held by
+    the caller are never changed.
 
     Round-off accumulates over many updates, mostly in single precision. :meth:`reset` recomputes the
     inverse from the current matrix (which the caller keeps); the running :attr:`pfaffian` is the Pfaffian
@@ -52,9 +54,11 @@ class PfaffianUpdater:
     _projections: torch.Tensor  # P = (a_1, ..., a_tau), (..., n, W) with W = sum 2k_t
     _r_inverses: torch.Tensor  # D = diag(R_1^{-1}, ..., R_tau^{-1}), (..., W, W)
     _delay: int
+    _owns_inverse: bool
     # Inverses with at most this many entries (batch * n^2) take one native immediate update per accepted move
-    # on CPU without a graph to build, instead of delaying it (see _native_immediate).
-    IMMEDIATE_MAX_NUMEL = 2**18
+    # on CPU without a graph to build, instead of delaying it (see _accept_in_place). The in-place kernels beat
+    # the delayed updates at every measured size, so the bound is only a switch (the tests set it to -1).
+    IMMEDIATE_MAX_NUMEL = 2**62
 
     @staticmethod
     def _check_matrix(matrix: torch.Tensor) -> None:
@@ -165,6 +169,7 @@ class PfaffianUpdater:
         updater._setup(max_delay, compiled)
         cls._check_matrix(inverse)
         updater._inverse = SkewGradient.apply_if_needed(inverse)
+        updater._owns_inverse = False  # the caller's tensor: copied before an in-place update
         updater._pfaffian = torch.ones(inverse.shape[:-2], dtype=inverse.dtype, device=inverse.device)
         if pfaffian is not None:
             updater._pfaffian = updater._pfaffian * pfaffian
@@ -213,9 +218,9 @@ class PfaffianUpdater:
         self._check_update(update)
         if mask is not None:
             update = torch.where(mask[..., None, None], update, torch.zeros_like(update))
-        native = self._native_immediate(LowRankPfaffian._ratio_and_inverse_core, update)
+        native = self._accept_in_place(LowRankPfaffian._ratio_and_inverse_core, update)
         if native is not None:
-            return self._accept_immediately(*native)
+            return native
         state = (self._inverse, self._projections, self._r_inverses, self._pfaffian)
         ratio, self._projections, self._r_inverses, self._pfaffian = self._backend._call(
             PfaffianUpdater._accept_core, *state, update
@@ -256,9 +261,9 @@ class PfaffianUpdater:
         if mask is not None:
             # c = 0 gives u = (0, e_i), so that -u J u^T = 0 and the ratio is exactly 1.
             change = torch.where(mask[..., None], change, torch.zeros_like(change))
-        native = self._native_immediate(LowRankPfaffian._ratio_replace_and_inverse_core, index, change)
+        native = self._accept_in_place(LowRankPfaffian._ratio_replace_and_inverse_core, index, change)
         if native is not None:
-            return self._accept_immediately(*native)
+            return native
         state = (self._inverse, self._projections, self._r_inverses, self._pfaffian)
         ratio, self._projections, self._r_inverses, self._pfaffian = self._backend._call(
             PfaffianUpdater._accept_replace_core, *state, index, change
@@ -269,7 +274,9 @@ class PfaffianUpdater:
         """
         Fold the delayed updates into the stored inverse, ``A_0^{-1} <- A_tau^{-1}``.
         """
-        self._inverse = self.inverse
+        if self._delay:
+            self._inverse = self._current_inverse()  # a new tensor, which nobody else holds
+            self._owns_inverse = True
         self._clear_delays()
 
     def reset(self, matrix: torch.Tensor) -> None:
@@ -287,6 +294,7 @@ class PfaffianUpdater:
         self._check_matrix(matrix)
         inverse = torch.linalg.inv_ex(matrix)[0]  # no host synchronization; non-finite if matrix is singular
         self._inverse = 0.5 * (inverse - inverse.mT)
+        self._owns_inverse = True
         self._pfaffian = pfaffian(matrix)
         self._clear_delays()
 
@@ -309,19 +317,35 @@ class PfaffianUpdater:
         return ratio
 
     def _native_immediate(self, core: Callable, *tensors: torch.Tensor) -> Any:
-        # With no delayed update pending and a small inverse, one native immediate update (or ratio) beats the
-        # delayed step's PyTorch operators: n = 32, 24 us against 135 us per row move on one thread; n = 512, 342
-        # us against 463 us. Large batches keep the delayed updates, which rewrite less memory (n = 128 with a
-        # batch of 64: 31 us against 39 us). None when the native path does not apply (see _native_call).
+        # A ratio from the native kernel when nothing is delayed (see _accept_in_place); None otherwise.
         if self._delay or self._inverse.numel() > PfaffianUpdater.IMMEDIATE_MAX_NUMEL:
             return None
         return LowRankPfaffian._native_call(core, (self._inverse, *tensors))
 
-    def _accept_immediately(self, ratio: torch.Tensor, inverse: torch.Tensor) -> torch.Tensor:
-        # An accepted update applied to the inverse at once: nothing is delayed.
-        self._inverse = inverse
-        self._pfaffian = self._pfaffian * ratio
+    def _accept_in_place(self, core: Callable, *tensors: torch.Tensor) -> torch.Tensor | None:
+        # With nothing delayed, an accepted move is applied to the inverse at once, in place, by the native kernel:
+        # one read and one write of the inverse, faster than the delayed step's PyTorch operators at every size
+        # measured (one thread; n = 32: 0.8 us against 4.9 us per row move on a batch of 64; n = 512 with a batch
+        # of 64: 0.18 ms against 0.53 ms). An inverse the caller holds is copied first. None when the native path
+        # does not apply (see LowRankPfaffian._native_plan).
+        if self._delay or self._inverse.numel() > PfaffianUpdater.IMMEDIATE_MAX_NUMEL:
+            return None
+        if not self._owns_inverse:
+            if LowRankPfaffian._native_plan(core, (self._inverse, *tensors), in_place=True) is None:
+                return None
+            self._inverse = self._inverse.clone()  # keeps the layout, row- or column-major
+            self._owns_inverse = True
+        ratio = LowRankPfaffian._native_call_in_place(core, (self._inverse, *tensors))
+        if ratio is not None:
+            self._pfaffian = self._pfaffian * ratio
         return ratio
+
+    def _current_inverse(self) -> torch.Tensor:
+        # The inverse with the delayed corrections applied, A_0^{-1} + P D P^T in one fused pass.
+        if not self._delay:
+            return self._inverse
+        right = LowRankPfaffian._matmul(self._r_inverses, self._projections.mT)
+        return LowRankPfaffian.add_product(self._inverse, self._projections, right)
 
     def _check_update(self, update: torch.Tensor) -> None:
         dimension = self._inverse.shape[-1]
@@ -369,10 +393,8 @@ class PfaffianUpdater:
         :rtype: torch.Tensor
         """
         if not self._delay:
-            return self._inverse
-        # One fused pass over the n x n inverse for all the delayed corrections: A_0^{-1} + P D P^T.
-        right = LowRankPfaffian._matmul(self._r_inverses, self._projections.mT)
-        return LowRankPfaffian.add_product(self._inverse, self._projections, right)
+            self._owns_inverse = False  # the caller holds it now: the next in-place update works on a copy
+        return self._current_inverse()
 
     @property
     def max_delay(self) -> int:

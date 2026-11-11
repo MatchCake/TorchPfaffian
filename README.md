@@ -75,16 +75,16 @@ with and without gradients, float64 and complex128, `m` from 8 to 256, and low-r
 
 | | fastest on, CPU | time vs fastest, CPU | fastest on, CUDA | time vs fastest, CUDA |
 |---|---|---|---|---|
-| TorchPfaffian | 35% | 1.4x | 36% | 1.6x |
-| lrux | 49% | 1.7x | 60% | 1.4x |
-| pfapack (C) | 19% | 7.9x | | |
-| torchpfaff | 0% | 25x | 33% | 3.5x |
+| TorchPfaffian | 49% | 1.3x | 42% | 1.5x |
+| lrux | 37% | 1.9x | 55% | 1.5x |
+| pfapack (C) | 17% | 9.2x | | |
+| torchpfaff | 0% | 30x | 25% | 1.9x |
 
 The time is the geometric mean, over the inputs a library computes, of its time over the fastest one's. A
 method whose first call takes over 10 s is timed from that call, compilation included, which raises the CUDA
 means of torchpfaff (its Triton kernel) and lrux on a few inputs.
-Single matrices favor pfapack on CPU and TorchPfaffian or lrux on CUDA; lrux (through fermix's kernels) is
-the fastest on large float64 batches on CUDA. Times depend on the machine: run the script on yours.
+Single matrices favor pfapack on CPU and TorchPfaffian on CUDA; lrux (through fermix's kernels) is the
+fastest on large float64 batches on CUDA. Times depend on the machine: run the script on yours.
 
 ## Requirements
 

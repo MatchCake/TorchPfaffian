@@ -27,8 +27,7 @@ class TestParlettReidTriton:
         assert not ParlettReidTriton.supports(torch.empty(2, 8, 8, dtype=torch.complex128, device="meta"))
         assert not ParlettReidTriton.supports(torch.empty(2, 7, 7, device="meta"))  # odd
         assert not ParlettReidTriton.supports(torch.empty(2, 2, 2, device="meta"))  # no elimination step
-        assert not ParlettReidTriton.supports(torch.empty(4, 1024, 1024, dtype=torch.float64, device="meta"))
-        assert not ParlettReidTriton.supports(torch.empty(4, 1024, 1024, device="meta"))  # float32: only not CUDA
+        assert not ParlettReidTriton.supports(torch.empty(1, 1026, 1026, device="meta"))  # beyond MAX_DIMENSION
 
     @CUDA
     def test_supports_on_cuda(self):  # pragma: no cover - needs a GPU
@@ -40,13 +39,13 @@ class TestParlettReidTriton:
         assert not ParlettReidTriton.supports(matrix[..., :7, :7])  # odd
         assert not ParlettReidTriton.supports(matrix[..., :2, :2])  # no elimination step
         assert not ParlettReidTriton.supports(torch.zeros(1, 1026, 1026, device="cuda"))  # beyond MAX_DIMENSION
-        large = torch.empty(4, 1024, 1024, dtype=torch.float64, device="cuda")  # 2^22 entries
-        assert not ParlettReidTriton.supports(large)  # float64 beyond FLOAT64_MAX_NUMEL
-        assert ParlettReidTriton.supports(large.float())
+        assert ParlettReidTriton.supports(torch.empty(4, 1024, 1024, dtype=torch.float64, device="cuda"))
 
     @CUDA
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-    @pytest.mark.parametrize(("size", "batch"), [(4, 3), (10, 5), (64, 7), (130, 2)])  # padded and tiled sizes
+    @pytest.mark.parametrize(
+        ("size", "batch"), [(4, 3), (10, 5), (40, 3), (64, 7), (130, 2), (290, 2)]
+    )  # panels and tiles
     def test_matches_the_pytorch_loop(self, dtype, size, batch, monkeypatch):  # pragma: no cover - needs a GPU
         pytest.importorskip("triton")
         matrix = self._skew(batch, size, size, dtype=dtype).cuda()

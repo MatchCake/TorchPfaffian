@@ -272,28 +272,48 @@ class LowRankPfaffian:
         }
 
     @staticmethod
-    def _native_call(core: Callable[..., T], tensors: tuple[torch.Tensor, ...]) -> T | None:
+    @functools.lru_cache(maxsize=1)
+    def _native_in_place_kernels() -> dict[Callable, dict[torch.dtype, Callable]]:
+        # The Rust kernels that update the inverse in place, per dtype; empty without the compiled extension.
+        try:
+            from .. import _rust
+        except ImportError:  # pragma: no cover - without the compiled extension
+            return {}
+        suffixes = {torch.float32: "f32", torch.float64: "f64", torch.complex64: "c64", torch.complex128: "c128"}
+        names: dict[Callable, str] = {
+            LowRankPfaffian._ratio_and_inverse_core: "low_rank_ratio_and_inverse_in_place",
+            LowRankPfaffian._ratio_replace_and_inverse_core: "replace_ratio_and_inverse_in_place",
+        }
+        return {
+            core: {dtype: getattr(_rust, f"{name}_{suffix}") for dtype, suffix in suffixes.items()}
+            for core, name in names.items()
+        }
+
+    @staticmethod
+    def _native_plan(
+        core: Callable, tensors: tuple[torch.Tensor, ...], in_place: bool = False
+    ) -> tuple[Callable, torch.Tensor, bool] | None:
         """
-        Run a core with its Rust kernel, for CPU inputs without a graph to build.
+        The Rust kernel of a core and how to pass it the inverse, when the native path applies.
 
-        A core is a handful of small PyTorch operators, whose per-operator cost (a few microseconds each on CPU)
-        dominates single small matrices; the kernel does the same arithmetic in one native call. It applies when
-        the core has a kernel for the dtype, every input is on CPU, no input needs a gradient, the inputs share
-        their batch shape without broadcasting, and the inverse is stored row- or column-major; otherwise it
-        returns ``None``, for the PyTorch core.
+        It applies when the core has a kernel for the dtype, every input is on CPU, no input needs a gradient, the
+        inputs share their batch shape without broadcasting, and the inverse is stored row- or column-major (a
+        column-major one, as :func:`torch.linalg.inv` returns, is passed as its row-major transpose). An in-place
+        kernel also needs an inverse that is not a conjugate view, so that the kernel writes the tensor itself.
 
-        :param core: One of the cores with a kernel (see :meth:`_native_kernels`).
+        :param core: The core.
         :param tensors: The core's validated inputs: ``(inverse, update)`` or ``(inverse, index, change)``.
-        :return: The core's result, or ``None``.
-        :rtype: T | None
+        :param in_place: Whether the kernel updates the inverse in place.
+        :return: The kernel, the buffer to pass as the inverse and whether it is the transpose; or ``None``.
+        :rtype: tuple[Callable, torch.Tensor, bool] | None
         """
-        kernel = LowRankPfaffian._native_kernels().get(core, {}).get(tensors[0].dtype)
+        kernels = LowRankPfaffian._native_in_place_kernels() if in_place else LowRankPfaffian._native_kernels()
+        kernel = kernels.get(core, {}).get(tensors[0].dtype)
         if kernel is None or any(tensor.device.type != "cpu" for tensor in tensors):
             return None
         if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in tensors):
             return None
         inverse, others = tensors[0], tensors[1:]
-        size = inverse.shape[-1]
         batch_shape = inverse.shape[:-2]
         offset = 2 if len(others) == 1 else 1  # update (..., n, 2k), or index (...) and change (..., n)
         if others[-1].shape[: others[-1].dim() - offset] != batch_shape or (
@@ -302,18 +322,35 @@ class LowRankPfaffian:
             return None
         if len(others) == 1 and others[0].shape[-1] > 2 and inverse.numel() >= LowRankPfaffian.NATIVE_WIDE_MAX_NUMEL:
             return None  # wide updates of large batches: BLAS's matrix products beat the kernel's dot products
-        # A column-major inverse (as torch.linalg.inv returns) is passed as its row-major transpose.
+        if in_place and inverse.is_conj():
+            return None
         if inverse.is_contiguous():
-            buffer, transposed = inverse, False
-        elif inverse.mT.is_contiguous():
-            buffer, transposed = inverse.mT, True
-        else:
-            return None  # broadcast or strided: copying it would cost more than the PyTorch core
-        array = LowRankPfaffian._numpy
-        if len(others) == 1:
-            result = kernel(array(buffer, 3), transposed, array(others[0], 3))
-        else:
-            result = kernel(array(buffer, 3), transposed, array(others[0], 1), array(others[1], 2))
+            return kernel, inverse, False
+        if inverse.mT.is_contiguous():
+            return kernel, inverse.mT, True
+        return None  # broadcast or strided: copying it would cost more than the PyTorch core
+
+    @staticmethod
+    def _native_call(core: Callable[..., T], tensors: tuple[torch.Tensor, ...]) -> T | None:
+        """
+        Run a core with its Rust kernel, for CPU inputs without a graph to build.
+
+        A core is a handful of small PyTorch operators, whose per-operator cost (a few microseconds each on CPU)
+        dominates single small matrices; the kernel does the same arithmetic in one native call. See
+        :meth:`_native_plan` for when it applies; otherwise it returns ``None``, for the PyTorch core.
+
+        :param core: One of the cores with a kernel (see :meth:`_native_kernels`).
+        :param tensors: The core's validated inputs: ``(inverse, update)`` or ``(inverse, index, change)``.
+        :return: The core's result, or ``None``.
+        :rtype: T | None
+        """
+        plan = LowRankPfaffian._native_plan(core, tensors)
+        if plan is None:
+            return None
+        kernel, buffer, transposed = plan
+        result = LowRankPfaffian._run_native(kernel, buffer, transposed, tensors[1:])
+        inverse = tensors[0]
+        size, batch_shape = inverse.shape[-1], inverse.shape[:-2]
         flat = len(batch_shape) == 1
         if isinstance(result, tuple):
             ratio, new_inverse = torch.from_numpy(result[0]), torch.from_numpy(result[1])
@@ -324,6 +361,38 @@ class LowRankPfaffian:
             return ratio, new_inverse  # type: ignore[return-value]
         ratio = torch.from_numpy(result)
         return ratio if flat else ratio.reshape(batch_shape)  # type: ignore[return-value]
+
+    @staticmethod
+    def _native_call_in_place(core: Callable, tensors: tuple[torch.Tensor, ...]) -> torch.Tensor | None:
+        """
+        Run an ``..._and_inverse`` core with its in-place Rust kernel: the inverse ``tensors[0]`` is overwritten.
+
+        One read and one write of each inverse instead of a read and a write to new memory: on a batch of large
+        matrices, which do not fit in the caches, it is about 2 to 7x faster. Only for callers that own the
+        inverse (:class:`~torch_pfaffian.low_rank.PfaffianUpdater`).
+
+        :param core: :meth:`_ratio_and_inverse_core` or :meth:`_ratio_replace_and_inverse_core`.
+        :param tensors: The core's validated inputs, the inverse first.
+        :return: The ratio, or ``None`` when the native path does not apply (see :meth:`_native_plan`), in which
+            case the inverse is unchanged.
+        :rtype: torch.Tensor | None
+        """
+        plan = LowRankPfaffian._native_plan(core, tensors, in_place=True)
+        if plan is None:
+            return None
+        kernel, buffer, transposed = plan
+        ratio = torch.from_numpy(LowRankPfaffian._run_native(kernel, buffer, transposed, tensors[1:]))
+        batch_shape = tensors[0].shape[:-2]
+        return ratio if len(batch_shape) == 1 else ratio.reshape(batch_shape)
+
+    @staticmethod
+    def _run_native(kernel: Callable, buffer: torch.Tensor, transposed: bool, others: tuple[torch.Tensor, ...]) -> Any:
+        # Call a kernel on NumPy views of the inputs; a contiguous buffer is passed as a view, so an in-place kernel
+        # writes the tensor itself.
+        array = LowRankPfaffian._numpy
+        if len(others) == 1:
+            return kernel(array(buffer, 3), transposed, array(others[0], 3))
+        return kernel(array(buffer, 3), transposed, array(others[0], 1), array(others[1], 2))
 
     @staticmethod
     def _numpy(tensor: torch.Tensor, dimensions: int) -> Any:
