@@ -2,6 +2,7 @@ from typing import Any
 
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from ..kernels.parlett_reid_slog import parlett_reid_slog
 
 
@@ -52,6 +53,6 @@ class SlogSignedPfaffian(torch.autograd.Function):
         matrix, pfaffian = ctx.saved_tensors
         singular = (pfaffian == 0)[..., None, None]
         identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device)
-        inverse, _ = torch.linalg.inv_ex(torch.where(singular, identity, matrix))
+        inverse, _ = CheckedLinalg.inv_ex(torch.where(singular, identity, matrix))
         gradient = 0.5 * grad_output[..., None, None] * (pfaffian[..., None, None] * inverse.transpose(-1, -2)).conj()
         return torch.where(singular, torch.zeros_like(gradient), gradient)

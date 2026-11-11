@@ -4,6 +4,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
+
 # The Rust inverse of _flagged_inverse, per dtype; empty when the extension is not built.
 _NATIVE_INVERSE: dict[torch.dtype, Callable[[Any], tuple[Any, Any, Any]]]
 try:
@@ -189,7 +191,7 @@ class PfaffianStrategy(torch.autograd.Function):
         epsilon = torch.finfo(matrix.dtype).eps
         identity = torch.eye(size, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
         with torch.no_grad():
-            factors, pivots, info = torch.linalg.lu_factor_ex(matrix)
+            factors, pivots, info = CheckedLinalg.lu_factor_ex(matrix)
             pivot_magnitude = factors.diagonal(dim1=-2, dim2=-1).abs()  # (..., k) |U_ii|
             ratio_threshold = epsilon**cls.SINGULARITY_RTOL_EXPONENT * pivot_magnitude.amax(dim=-1)
             rank_flag = (info != 0) | ~(pivot_magnitude.amin(dim=-1) > ratio_threshold)  # nan-safe
@@ -202,7 +204,7 @@ class PfaffianStrategy(torch.autograd.Function):
             residual_flag = ~rank_flag & ~(residual <= epsilon**cls.INVERSE_RESIDUAL_RTOL_EXPONENT)
         if torch.is_grad_enabled() and matrix.requires_grad:
             flagged = rank_flag | residual_flag
-            inverse, _ = torch.linalg.inv_ex(torch.where(flagged[..., None, None], identity, matrix))
+            inverse, _ = CheckedLinalg.inv_ex(torch.where(flagged[..., None, None], identity, matrix))
         return inverse, rank_flag, residual_flag
 
     @staticmethod
@@ -351,7 +353,7 @@ class PfaffianStrategy(torch.autograd.Function):
         size = matrix.shape[-1]
         identity = torch.eye(size, dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
         with torch.no_grad():
-            factors, pivots, info = torch.linalg.lu_factor_ex(matrix)
+            factors, pivots, info = CheckedLinalg.lu_factor_ex(matrix)
             pivot_magnitude = factors.diagonal(dim1=-2, dim2=-1).abs()  # (..., k) |U_ii|
             threshold = size * torch.finfo(matrix.dtype).eps * pivot_magnitude.amax(dim=-1)
             singular = (info != 0) | ~(pivot_magnitude.amin(dim=-1) > threshold) | (pfaffian == 0)
@@ -361,7 +363,7 @@ class PfaffianStrategy(torch.autograd.Function):
             safe_pivots = torch.where(singular[..., None], identity_pivots.expand_as(pivots), pivots)
             inverse = torch.linalg.lu_solve(safe_factors, safe_pivots, identity)
         if torch.is_grad_enabled() and matrix.requires_grad:
-            inverse, _ = torch.linalg.inv_ex(torch.where(singular[..., None, None], identity, matrix))
+            inverse, _ = CheckedLinalg.inv_ex(torch.where(singular[..., None, None], identity, matrix))
         return inverse, singular
 
     @staticmethod

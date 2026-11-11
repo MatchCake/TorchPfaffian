@@ -1,3 +1,4 @@
+from .checked_linalg import CheckedLinalg
 from .det_magnitude import log_magnitude_pfaffian, magnitude_pfaffian
 from .parlett_reid_slog import parlett_reid_slog
 from .parlett_reid_triton import ParlettReidTriton

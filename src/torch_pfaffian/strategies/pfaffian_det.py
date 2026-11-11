@@ -1,5 +1,6 @@
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from .strategy import PfaffianStrategy
 
 
@@ -18,4 +19,4 @@ class PfaffianDet(PfaffianStrategy):
 
     @staticmethod
     def apply(matrix: torch.Tensor) -> torch.Tensor:
-        return torch.sqrt(torch.clamp(torch.abs(torch.linalg.det(matrix)), min=PfaffianStrategy.EPSILON))
+        return torch.sqrt(torch.clamp(torch.abs(CheckedLinalg.det(matrix)), min=PfaffianStrategy.EPSILON))

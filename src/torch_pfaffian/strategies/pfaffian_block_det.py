@@ -2,6 +2,7 @@ from typing import cast
 
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from .strategy import PfaffianStrategy
 
 
@@ -83,7 +84,7 @@ class PfaffianBlockDet(PfaffianStrategy):
             )
         n = matrix.shape[-1] // 2
         block = matrix[..., :n, n:]  # (..., n, n) upper-right block
-        return (-1) ** (n * (n - 1) // 2) * torch.linalg.det(block)
+        return (-1) ** (n * (n - 1) // 2) * CheckedLinalg.det(block)
 
     @staticmethod
     def backward(
@@ -245,7 +246,7 @@ class PfaffianBlockDet(PfaffianStrategy):
         reversed_values = singular_values.flip(-1)
         suffix = torch.cumprod(torch.cat([ones, reversed_values[..., :-1]], dim=-1), dim=-1).flip(-1)  # j>i
         products = (prefix * suffix).to(blocks.dtype)  # (m, n) prod_{j != i} sigma_j
-        phase = torch.linalg.det(left) * torch.linalg.det(right_adjoint)  # (m,) unit modulus
+        phase = CheckedLinalg.det(left) * CheckedLinalg.det(right_adjoint)  # (m,) unit modulus
         adjugate = phase[..., None, None] * (right_adjoint.mH * products[..., None, :]) @ left.mH
         return adjugate.transpose(-1, -2)
 
@@ -264,6 +265,7 @@ class PfaffianBlockDet(PfaffianStrategy):
         :rtype: torch.Tensor
         """
         n = blocks.shape[-1]
+        CheckedLinalg.check(blocks[..., 1:, 1:])  # once for the n^2 minors, which share that shape
         cofactor = torch.zeros_like(blocks)
         indices = torch.arange(n, device=blocks.device)
         for row in range(n):

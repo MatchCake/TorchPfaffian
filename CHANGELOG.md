@@ -113,6 +113,12 @@ changes the package's behaviour, API, documentation or packaging.
   dropped the phase's derivative. It now recovers only the non-finite elements, with the full derivative
   `0.5 * Pf * A^{-T}` (`SlogSignedPfaffian`), and the other elements keep the gradient of the linear domain,
   which also keeps the exact adjugate gradient of singular elements in such a batch, real or complex (#28).
+- After `torch.set_num_threads(n)` with `n >= 2`, PyTorch's MKL backend corrupts batched LU factorizations on
+  CPU from about `m = 150` (pytorch/pytorch#142815), so the determinant- and inverse-based paths returned
+  wrong values, mostly without an error. `CheckedLinalg` now verifies a probe factored the same way for
+  batched LUs of at least two CPU matrices of size `m >= 96`, caching the verdict per size, dtype and thread
+  count, and raises a `RuntimeError` naming the cause
+  and the workaround (`OMP_NUM_THREADS` at launch) (#23).
 
 ## [0.0.6] - 2026-11-09
 

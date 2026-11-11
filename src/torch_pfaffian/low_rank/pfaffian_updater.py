@@ -3,6 +3,7 @@ from typing import Any
 
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from .compiled_low_rank_pfaffian import CompiledLowRankPfaffian
 from .low_rank_pfaffian import LowRankPfaffian
 from .skew_gradient import SkewGradient
@@ -292,7 +293,7 @@ class PfaffianUpdater:
         from .. import pfaffian
 
         self._check_matrix(matrix)
-        inverse = torch.linalg.inv_ex(matrix)[0]  # no host synchronization; non-finite if matrix is singular
+        inverse = CheckedLinalg.inv_ex(matrix)[0]  # no host synchronization; non-finite if matrix is singular
         self._inverse = 0.5 * (inverse - inverse.mT)
         self._owns_inverse = True
         self._pfaffian = pfaffian(matrix)

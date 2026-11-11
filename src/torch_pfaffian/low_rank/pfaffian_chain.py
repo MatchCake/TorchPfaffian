@@ -1,5 +1,6 @@
 import torch
 
+from ..kernels.checked_linalg import CheckedLinalg
 from .compiled_low_rank_pfaffian import CompiledLowRankPfaffian
 from .low_rank_pfaffian import LowRankPfaffian
 
@@ -68,7 +69,7 @@ class PfaffianChain:
         if matrix.dim() < 2 or matrix.shape[-1] != matrix.shape[-2]:
             raise ValueError(f"matrix must have shape (..., m, m); got {tuple(matrix.shape)}.")
         chain = cls(matrix.shape[:-2], dtype=matrix.dtype, device=matrix.device, compiled=compiled)
-        inverse = torch.linalg.inv_ex(matrix)[0]  # no host synchronization; non-finite if matrix is singular
+        inverse = CheckedLinalg.inv_ex(matrix)[0]  # no host synchronization; non-finite if matrix is singular
         chain._inverse = 0.5 * (inverse - inverse.mT)
         chain._pfaffian = pfaffian(matrix)
         return chain
