@@ -496,7 +496,8 @@ class TestTorchPfaffian:
     def test_pfaffian_overflow_recovery_gradient_is_the_full_complex_derivative(self):
         # A complex element whose linear product overflows while its Pfaffian is finite: its recovered gradient
         # is 0.5 * conj(Pf A^{-T}), the phase's derivative included.
-        phases = torch.exp(1j * torch.linspace(0.3, 1.1, 8, dtype=torch.float64))
+        angles = torch.linspace(0.3, 1.1, 8, dtype=torch.float64)
+        phases = torch.exp(1j * angles)
         magnitudes = torch.tensor([1e200, 1e200] + [1e-29] * 6, dtype=torch.float64)  # Pf about 1e226
         matrix = _block_diagonal_skew([1.0] * 8).to(torch.complex128)
         for index, coefficient in enumerate(magnitudes * phases):
@@ -505,7 +506,8 @@ class TestTorchPfaffian:
         matrix.requires_grad_(True)
         result = pfaffian(matrix)
         result.real.backward()
-        expected_value = (magnitudes * phases).prod()
+        # In the log domain: a plain product overflows when its order multiplies the two 1e200 first (arm64).
+        expected_value = torch.exp(torch.log(magnitudes).sum()) * torch.exp(1j * angles.sum())
         torch.testing.assert_close(
             result.detach(), expected_value, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
         )
