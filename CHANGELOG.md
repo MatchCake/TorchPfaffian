@@ -106,6 +106,14 @@ changes the package's behaviour, API, documentation or packaging.
   them, with host-to-device copies on CUDA, on every call. This also speeds up `pfaffian()` for `m <= 6`: a
   single `6 x 6` matrix takes 29 µs instead of 47 µs on CPU, 91 µs instead of 150 µs on CUDA.
 
+### Fixed
+
+- `pfaffian()` gave a wrong gradient to every element of a complex batch in which one element overflowed in
+  the linear domain: the recovery recomputed the whole batch as `phase * exp(log|Pf|)`, whose gradient
+  dropped the phase's derivative. It now recovers only the non-finite elements, with the full derivative
+  `0.5 * Pf * A^{-T}` (`SlogSignedPfaffian`), and the other elements keep the gradient of the linear domain,
+  which also keeps the exact adjugate gradient of singular elements in such a batch, real or complex (#28).
+
 ## [0.0.6] - 2026-11-09
 
 ### Added

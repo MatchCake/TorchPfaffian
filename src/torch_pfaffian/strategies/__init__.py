@@ -8,6 +8,7 @@ from .pfaffian_fdbpf import PfaffianFDBPf
 from .pfaffian_masked_magnitude import PfaffianMaskedMagnitude
 from .pfaffian_parlett_reid import PfaffianParlettReid
 from .pfaffian_slog import SlogPfaffianStrategy
+from .pfaffian_slog_signed import SlogSignedPfaffian
 from .pfaffian_small import PfaffianSmall
 from .strategy import PfaffianStrategy
 

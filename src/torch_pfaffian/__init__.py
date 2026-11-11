@@ -364,14 +364,22 @@ def _pfaffian(
         # exp(log|Pf|) for the signed path, exp(log|Pf|) for the magnitude path), so the caller gets
         # the correct value without reaching for slog_pfaffian. Only a magnitude that genuinely exceeds
         # the dtype's float range stays non-finite, and only then is a warning emitted.
-        # Recompute the whole batch in the log domain and use it: its reconstruction equals the linear
-        # result on the finite elements (to log/exp rounding) and stays finite on the overflowed ones,
-        # and its gradient (``0.5 * Pf * (A^{-1})^T`` for the signed path) is finite everywhere. The
-        # linear graph is discarded, avoiding the ``0 * inf = NaN`` its backward would form from the
-        # saved infinite Pfaffian.
+        # The plain magnitude path recomputes the whole batch in the log domain: its reconstruction equals the
+        # linear result on the finite elements (to log/exp rounding), its gradient is exact, and the linear graph
+        # is discarded, avoiding the ``0 * inf = NaN`` its backward would form from the saved infinite result.
         if sign:
-            phase, log_abs = slog_pfaffian(matrix)
-            result = phase * torch.exp(log_abs).to(phase.dtype)
+            # Recover only the non-finite elements with a finite input, so the others keep the exact gradient of
+            # the linear domain (the adjugate at singular elements). With a graph, the linear result is computed
+            # again with the identity in place of the recovered elements: its saved infinite Pfaffians would
+            # otherwise form 0 * inf = NaN in their backward. The recovered elements take SlogSignedPfaffian,
+            # whose backward is the full derivative: through slog_pfaffian it would miss the complex phase's.
+            needs_recovery = ~torch.isfinite(result) & torch.isfinite(matrix).flatten(-2).all(dim=-1)
+            identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+            if matrix.requires_grad and torch.is_grad_enabled():
+                kept = torch.where(needs_recovery[..., None, None], identity, matrix)
+                result = _pfaffian(kept, sign, False, epsilon, mask_roundoff_gradient, stacklevel + 1)
+            recovered = SlogSignedPfaffian.apply(torch.where(needs_recovery[..., None, None], matrix, identity))
+            result = torch.where(needs_recovery, recovered, result)
         elif mask_roundoff_gradient:
             # Recover only the non-finite elements with a finite input, so the others keep the masked
             # gradient. The log-domain branch sees the identity elsewhere: its backward still runs on the
