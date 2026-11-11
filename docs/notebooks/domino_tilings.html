@@ -1,0 +1,423 @@
+
+
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Domino tilings and dimer probabilities &mdash; TorchPfaffian  documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="../static/css/custom.css" type="text/css" />
+  <link rel="stylesheet" href="../static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="../static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="../static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="../static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Performance" href="../performance.html" />
+    <link rel="prev" title="The pfaffian function" href="tutorial.html" /> 
+
+</head>
+
+<body>
+    <header>
+        <div class="container">
+            <a class="site-nav-toggle hidden-lg-up"><i class="icon-menu"></i></a>
+            <a class="site-title" href="../index.html">
+                TorchPfaffian
+            </a>
+        </div>
+    </header>
+
+
+<div class="breadcrumbs-outer hidden-xs-down">
+    <div class="container">
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="breadcrumbs">
+    
+      <li><a href="../index.html">Docs</a></li>
+        
+      <li>Domino tilings and dimer probabilities</li>
+    
+    
+      <li class="breadcrumbs-aside">
+        
+            
+            <a href="../sources/notebooks/domino_tilings.ipynb.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+</div>
+    </div>
+</div>
+    <div class="main-outer">
+        <div class="container">
+            <div class="row">
+                <div class="col-12 col-lg-3 site-nav">
+                    
+<div role="search">
+    <form class="search" action="../search.html" method="get">
+        <div class="icon-input">
+            <input type="text" name="q" placeholder="Search" />
+            <span class="icon-search"></span>
+        </div>
+        <input type="submit" value="Go" class="d-hidden" />
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+                    <div class="site-nav-tree">
+                        
+                            
+                            
+                                <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../readme.html">TorchPfaffian: PyTorch-Based Pfaffian Computation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../readme.html#description">Description</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#statement-of-need">Statement of need</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#usage">Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../readme.html#important-links">Important Links</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../readme.html#found-a-bug-have-a-question-or-a-feature-request">Found a bug, have a question or a feature request?</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#license">License</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#citation">Citation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../readme.html#related-software">Related software</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="tutorial.html">The <code class="docutils literal notranslate"><span class="pre">pfaffian</span></code> function</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorial.html#input-a-single-skew-symmetric-matrix">Input: a single skew-symmetric matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorial.html#input-a-batch-of-matrices">Input: a batch of matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorial.html#input-dtype-real-or-complex">Input dtype: real or complex</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorial.html#output-signed-value-or-magnitude">Output: signed value or magnitude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorial.html#output-differentiable">Output: differentiable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorial.html#summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Domino tilings and dimer probabilities</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#the-kasteleyn-matrix">The Kasteleyn matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#counting-tilings">Counting tilings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#dimer-probabilities-from-the-gradient">Dimer probabilities from the gradient</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#many-weightings-at-once">Many weightings at once</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../performance.html">Performance</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html#full-pfaffians">Full Pfaffians</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html#pfaffian-ratios-under-low-rank-updates">Pfaffian ratios under low-rank updates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html#reading-the-results">Reading the results</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../limitations.html">Limitations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../limitations.html#input-assumptions">Input assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../limitations.html#supported-dtypes-and-half-precision">Supported dtypes and half precision</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../limitations.html#torch-func-transforms"><code class="docutils literal notranslate"><span class="pre">torch.func</span></code> transforms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../limitations.html#thread-count-and-mkl">Thread count and MKL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../limitations.html#derivatives-at-singular-matrices">Derivatives at singular matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../limitations.html#tiny-pivots">Tiny pivots</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../limitations.html#devices-and-platforms">Devices and platforms</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Modules:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../torch_pfaffian.html">torch_pfaffian package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../torch_pfaffian.html#subpackages">Subpackages</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../torch_pfaffian.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../torch_pfaffian.html#module-torch_pfaffian.utils">torch_pfaffian.utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../torch_pfaffian.html#module-torch_pfaffian">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+                            
+                        
+                    </div>
+                </div>
+                <div class="col-12 col-lg-9">
+                    <div class="document">
+                        
+                            
+  <section class="tex2jax_ignore mathjax_ignore" id="domino-tilings-and-dimer-probabilities">
+<h1>Domino tilings and dimer probabilities<a class="headerlink" href="#domino-tilings-and-dimer-probabilities" title="Permalink to this heading">¶</a></h1>
+<p>This tutorial uses TorchPfaffian on a classic problem of statistical physics: the <strong>dimer model</strong>. A domino
+tiling of an <span class="math notranslate nohighlight">\(R \times C\)</span> board is a perfect matching of the grid graph: every square is covered by exactly
+one domino, which pairs it with a neighbour. Kasteleyn (1961) and Temperley and Fisher (1961) showed that,
+for a planar graph, the number of perfect matchings is a Pfaffian:</p>
+<div class="math notranslate nohighlight">
+\[
+Z = |\mathrm{Pf}(K)|,
+\]</div>
+<p>where <span class="math notranslate nohighlight">\(K\)</span> is the <em>Kasteleyn matrix</em>: a skew-symmetric adjacency matrix whose signs are chosen so that every
+matching contributes with the same sign. For the grid, horizontal edges get <span class="math notranslate nohighlight">\(+1\)</span> and vertical edges get
+<span class="math notranslate nohighlight">\((-1)^c\)</span>, where <span class="math notranslate nohighlight">\(c\)</span> is the column.</p>
+<p>With edge weights <span class="math notranslate nohighlight">\(w_e\)</span>, <span class="math notranslate nohighlight">\(Z(w) = |\mathrm{Pf}(K(w))|\)</span> is the partition function of the dimer model, and the
+probability that edge <span class="math notranslate nohighlight">\(e\)</span> belongs to a random tiling is a derivative,</p>
+<div class="math notranslate nohighlight">
+\[
+P(e) = w_e \frac{\partial \log Z}{\partial w_e},
+\]</div>
+<p>which autograd computes for every edge in a single backward pass.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch_pfaffian</span><span class="w"> </span><span class="kn">import</span> <span class="n">pfaffian</span><span class="p">,</span> <span class="n">slog_pfaffian</span>
+</pre></div>
+</div>
+</div>
+</div>
+<section id="the-kasteleyn-matrix">
+<h2>The Kasteleyn matrix<a class="headerlink" href="#the-kasteleyn-matrix" title="Permalink to this heading">¶</a></h2>
+<p>The function below builds <span class="math notranslate nohighlight">\(K\)</span> from the horizontal weights, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">R,</span> <span class="pre">C</span> <span class="pre">-</span> <span class="pre">1)</span></code>, and the vertical
+weights, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">R</span> <span class="pre">-</span> <span class="pre">1,</span> <span class="pre">C)</span></code>. It accepts any leading batch shape and is differentiable in the
+weights.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">kasteleyn_matrix</span><span class="p">(</span><span class="n">horizontal</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">vertical</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+    <span class="n">rows</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="n">vertical</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">horizontal</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="n">site</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">rows</span> <span class="o">*</span> <span class="n">columns</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+    <span class="n">batch_shape</span> <span class="o">=</span> <span class="n">horizontal</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">matrix</span> <span class="o">=</span> <span class="n">horizontal</span><span class="o">.</span><span class="n">new_zeros</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">rows</span> <span class="o">*</span> <span class="n">columns</span><span class="p">,</span> <span class="n">rows</span> <span class="o">*</span> <span class="n">columns</span><span class="p">)</span>
+    <span class="n">signs</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="mf">1.0</span><span class="p">)</span> <span class="o">**</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">columns</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">vertical</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>  <span class="c1"># Kasteleyn signs of the vertical edges</span>
+    <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">weights</span> <span class="ow">in</span> <span class="p">[</span>
+        <span class="p">(</span><span class="n">site</span><span class="p">[:,</span> <span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">site</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:],</span> <span class="n">horizontal</span><span class="p">),</span>
+        <span class="p">(</span><span class="n">site</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:],</span> <span class="n">site</span><span class="p">[</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:],</span> <span class="n">vertical</span> <span class="o">*</span> <span class="n">signs</span><span class="p">),</span>
+    <span class="p">]:</span>
+        <span class="n">matrix</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">start</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span> <span class="n">end</span><span class="o">.</span><span class="n">flatten</span><span class="p">()]</span> <span class="o">=</span> <span class="n">weights</span><span class="o">.</span><span class="n">flatten</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">matrix</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">end</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span> <span class="n">start</span><span class="o">.</span><span class="n">flatten</span><span class="p">()]</span> <span class="o">=</span> <span class="o">-</span><span class="n">weights</span><span class="o">.</span><span class="n">flatten</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">matrix</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">uniform_weights</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">columns</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+    <span class="n">horizontal</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+    <span class="n">vertical</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">rows</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">columns</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">horizontal</span><span class="p">,</span> <span class="n">vertical</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="counting-tilings">
+<h2>Counting tilings<a class="headerlink" href="#counting-tilings" title="Permalink to this heading">¶</a></h2>
+<p>The number of tilings of a few boards, compared with the known values (OEIS A099390). A board with an odd
+number of squares has no tiling, and its Kasteleyn matrix has an odd dimension, whose Pfaffian is 0.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">known</span> <span class="o">=</span> <span class="p">{(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">):</span> <span class="mi">2</span><span class="p">,</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">10</span><span class="p">):</span> <span class="mi">89</span><span class="p">,</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span> <span class="mi">0</span><span class="p">,</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span> <span class="mi">11</span><span class="p">,</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span> <span class="mi">36</span><span class="p">,</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">):</span> <span class="mi">6728</span><span class="p">,</span> <span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span> <span class="mi">12988816</span><span class="p">}</span>
+<span class="k">for</span> <span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="p">),</span> <span class="n">expected</span> <span class="ow">in</span> <span class="n">known</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="n">pfaffian</span><span class="p">(</span><span class="n">kasteleyn_matrix</span><span class="p">(</span><span class="o">*</span><span class="n">uniform_weights</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="p">)))</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">rows</span><span class="si">}</span><span class="s2"> x </span><span class="si">{</span><span class="n">columns</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">round</span><span class="p">(</span><span class="n">count</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;10d</span><span class="si">}</span><span class="s2"> tilings (expected </span><span class="si">{</span><span class="n">expected</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">round</span><span class="p">(</span><span class="n">count</span><span class="p">)</span> <span class="o">==</span> <span class="n">expected</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>2 x 2:          2 tilings (expected 2)
+2 x 10:         89 tilings (expected 89)
+3 x 3:          0 tilings (expected 0)
+3 x 4:         11 tilings (expected 11)
+4 x 4:         36 tilings (expected 36)
+6 x 6:       6728 tilings (expected 6728)
+8 x 8:   12988816 tilings (expected 12988816)
+</pre></div>
+</div>
+</div>
+</div>
+<p>The count grows like <span class="math notranslate nohighlight">\(e^{G R C / \pi}\)</span>, with <span class="math notranslate nohighlight">\(G \approx 0.916\)</span> Catalan’s constant, so it soon
+exceeds the range of <code class="docutils literal notranslate"><span class="pre">float64</span></code> even though the Pfaffian of a moderate matrix is easy to compute.
+<code class="docutils literal notranslate"><span class="pre">slog_pfaffian</span></code> works in the log domain and returns <span class="math notranslate nohighlight">\(\log Z\)</span> directly. The free energy per square,
+<span class="math notranslate nohighlight">\(\log Z / (R C)\)</span>, approaches <span class="math notranslate nohighlight">\(G / \pi\)</span> as the board grows; the difference is the boundary contribution,
+which decreases like <span class="math notranslate nohighlight">\(1 / L\)</span>.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">catalan</span> <span class="o">=</span> <span class="mf">0.915965594177219015054603514932</span>
+<span class="n">sizes</span> <span class="o">=</span> <span class="p">[</span><span class="mi">8</span><span class="p">,</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">24</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">40</span><span class="p">]</span>
+<span class="n">free_energies</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">size</span> <span class="ow">in</span> <span class="n">sizes</span><span class="p">:</span>
+    <span class="n">_</span><span class="p">,</span> <span class="n">log_count</span> <span class="o">=</span> <span class="n">slog_pfaffian</span><span class="p">(</span><span class="n">kasteleyn_matrix</span><span class="p">(</span><span class="o">*</span><span class="n">uniform_weights</span><span class="p">(</span><span class="n">size</span><span class="p">,</span> <span class="n">size</span><span class="p">)))</span>
+    <span class="n">free_energies</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">log_count</span><span class="o">.</span><span class="n">item</span><span class="p">()</span> <span class="o">/</span> <span class="n">size</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">size</span><span class="si">:</span><span class="s2">&gt;2d</span><span class="si">}</span><span class="s2"> x </span><span class="si">{</span><span class="n">size</span><span class="si">:</span><span class="s2">&lt;2d</span><span class="si">}</span><span class="s2">: log Z = </span><span class="si">{</span><span class="n">log_count</span><span class="o">.</span><span class="n">item</span><span class="p">()</span><span class="si">:</span><span class="s2">8.2f</span><span class="si">}</span><span class="s2">, log Z / L^2 = </span><span class="si">{</span><span class="n">free_energies</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.5f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;G / pi = </span><span class="si">{</span><span class="n">catalan</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">math</span><span class="o">.</span><span class="n">pi</span><span class="si">:</span><span class="s2">.5f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="mi">1</span> <span class="o">/</span> <span class="n">size</span> <span class="k">for</span> <span class="n">size</span> <span class="ow">in</span> <span class="n">sizes</span><span class="p">],</span> <span class="n">free_energies</span><span class="p">,</span> <span class="s2">&quot;o-&quot;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;log Z / L^2&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">catalan</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;gray&quot;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s2">&quot;--&quot;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;G / pi&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s2">&quot;1 / L&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s2">&quot;free energy per square&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span> 8 x 8 : log Z =    16.38, log Z / L^2 = 0.25593
+16 x 16: log Z =    69.97, log Z / L^2 = 0.27333
+24 x 24: log Z =   160.88, log Z / L^2 = 0.27931
+32 x 32: log Z =   289.12, log Z / L^2 = 0.28234
+</pre></div>
+</div>
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>40 x 40: log Z =   454.67, log Z / L^2 = 0.28417
+G / pi = 0.29156
+</pre></div>
+</div>
+<img alt="../_images/81b92de27f0389af43d2072ab31e1c7d629f406e75b7fce3a88b5cb2de5ecb9f.png" src="../_images/81b92de27f0389af43d2072ab31e1c7d629f406e75b7fce3a88b5cb2de5ecb9f.png" />
+</div>
+</div>
+</section>
+<section id="dimer-probabilities-from-the-gradient">
+<h2>Dimer probabilities from the gradient<a class="headerlink" href="#dimer-probabilities-from-the-gradient" title="Permalink to this heading">¶</a></h2>
+<p>The gradient of <span class="math notranslate nohighlight">\(\log Z\)</span> with respect to the weights, at <span class="math notranslate nohighlight">\(w = 1\)</span>, gives the probability that each edge
+carries a domino. Every square is covered exactly once, so the probabilities of the edges around a square
+sum to 1, which the cell checks.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">8</span>
+<span class="n">horizontal</span><span class="p">,</span> <span class="n">vertical</span> <span class="o">=</span> <span class="p">(</span><span class="n">weights</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span> <span class="k">for</span> <span class="n">weights</span> <span class="ow">in</span> <span class="n">uniform_weights</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="p">))</span>
+<span class="n">_</span><span class="p">,</span> <span class="n">log_count</span> <span class="o">=</span> <span class="n">slog_pfaffian</span><span class="p">(</span><span class="n">kasteleyn_matrix</span><span class="p">(</span><span class="n">horizontal</span><span class="p">,</span> <span class="n">vertical</span><span class="p">))</span>
+<span class="n">log_count</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+<span class="n">horizontal_probability</span> <span class="o">=</span> <span class="p">(</span><span class="n">horizontal</span> <span class="o">*</span> <span class="n">horizontal</span><span class="o">.</span><span class="n">grad</span><span class="p">)</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+<span class="n">vertical_probability</span> <span class="o">=</span> <span class="p">(</span><span class="n">vertical</span> <span class="o">*</span> <span class="n">vertical</span><span class="o">.</span><span class="n">grad</span><span class="p">)</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+
+<span class="n">coverage</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+<span class="n">coverage</span><span class="p">[:,</span> <span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="n">horizontal_probability</span>
+<span class="n">coverage</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span> <span class="o">+=</span> <span class="n">horizontal_probability</span>
+<span class="n">coverage</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:]</span> <span class="o">+=</span> <span class="n">vertical_probability</span>
+<span class="n">coverage</span><span class="p">[</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:]</span> <span class="o">+=</span> <span class="n">vertical_probability</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;coverage of each square: min </span><span class="si">{</span><span class="n">coverage</span><span class="o">.</span><span class="n">min</span><span class="p">()</span><span class="si">:</span><span class="s2">.15f</span><span class="si">}</span><span class="s2">, max </span><span class="si">{</span><span class="n">coverage</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="si">:</span><span class="s2">.15f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">torch</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">coverage</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">coverage</span><span class="p">))</span>
+
+<span class="n">figure</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+<span class="k">for</span> <span class="n">axis</span><span class="p">,</span> <span class="n">probability</span><span class="p">,</span> <span class="n">title</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span>
+    <span class="n">axes</span><span class="p">,</span> <span class="p">[</span><span class="n">horizontal_probability</span><span class="p">,</span> <span class="n">vertical_probability</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;horizontal dominoes&quot;</span><span class="p">,</span> <span class="s2">&quot;vertical dominoes&quot;</span><span class="p">]</span>
+<span class="p">):</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">axis</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">probability</span><span class="p">,</span> <span class="n">vmin</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">vmax</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s2">&quot;viridis&quot;</span><span class="p">)</span>
+    <span class="n">axis</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="n">title</span><span class="p">)</span>
+<span class="n">figure</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">axes</span><span class="p">,</span> <span class="n">shrink</span><span class="o">=</span><span class="mf">0.8</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;probability&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>coverage of each square: min 1.000000000000000, max 1.000000000000000
+</pre></div>
+</div>
+<img alt="../_images/79891143995f8947d83d83dab37ad3bc2a8950c138eae34b8e3ad1bddd577f03.png" src="../_images/79891143995f8947d83d83dab37ad3bc2a8950c138eae34b8e3ad1bddd577f03.png" />
+</div>
+</div>
+<p>Near the corners the dominoes are strongly ordered: a corner square is covered by a horizontal or a
+vertical domino with probability <span class="math notranslate nohighlight">\(1/2\)</span> each, while the probabilities in the bulk tend to <span class="math notranslate nohighlight">\(1/4\)</span>.</p>
+</section>
+<section id="many-weightings-at-once">
+<h2>Many weightings at once<a class="headerlink" href="#many-weightings-at-once" title="Permalink to this heading">¶</a></h2>
+<p>Every function takes a leading batch dimension. Here 256 random weightings of the <span class="math notranslate nohighlight">\(8 \times 8\)</span> board are
+evaluated in one call, and their edge probabilities in one backward pass. On a GPU, moving the weights with
+<code class="docutils literal notranslate"><span class="pre">.cuda()</span></code> is the only change.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">generator</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Generator</span><span class="p">()</span><span class="o">.</span><span class="n">manual_seed</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">horizontal</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">columns</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span> <span class="n">generator</span><span class="o">=</span><span class="n">generator</span><span class="p">)</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">vertical</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="n">rows</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">columns</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span> <span class="n">generator</span><span class="o">=</span><span class="n">generator</span><span class="p">)</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">_</span><span class="p">,</span> <span class="n">log_partition</span> <span class="o">=</span> <span class="n">slog_pfaffian</span><span class="p">(</span><span class="n">kasteleyn_matrix</span><span class="p">(</span><span class="n">horizontal</span><span class="p">,</span> <span class="n">vertical</span><span class="p">))</span>
+<span class="n">log_partition</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+<span class="n">corner</span> <span class="o">=</span> <span class="n">horizontal</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">horizontal</span><span class="o">.</span><span class="n">grad</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">vertical</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">vertical</span><span class="o">.</span><span class="n">grad</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span>
+    <span class="n">log_partition</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
+    <span class="s2">&quot;partition functions; corner coverage:&quot;</span><span class="p">,</span>
+    <span class="n">torch</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">corner</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)),</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>torch.Size([256]) partition functions; corner coverage: True
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+
+
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>    
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../',
+            VERSION:'',
+            LANGUAGE:'en',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+    <script type="text/javascript" src="../static/documentation_options.js"></script>
+    <script type="text/javascript" src="../static/doctools.js"></script>
+    <script type="text/javascript" src="../static/sphinx_highlight.js"></script>
+    <script type="text/javascript" src="../None"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script type="text/javascript" src="../static/js/theme.js"></script>
+  
+    <div class="footer" role="contentinfo">
+        <div class="container">
+            &#169; Copyright 2024, Jérémie Gince.
+        Created using <a href="http://sphinx-doc.org/">Sphinx</a> 6.2.1.
+        </div>
+    </div>  
+
+</body>
+</html>

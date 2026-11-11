@@ -1,0 +1,238 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "73ea9b9f",
+   "metadata": {},
+   "source": [
+    "# Domino tilings and dimer probabilities\n",
+    "\n",
+    "This tutorial uses TorchPfaffian on a classic problem of statistical physics: the **dimer model**. A domino\n",
+    "tiling of an $R \\times C$ board is a perfect matching of the grid graph: every square is covered by exactly\n",
+    "one domino, which pairs it with a neighbour. Kasteleyn (1961) and Temperley and Fisher (1961) showed that,\n",
+    "for a planar graph, the number of perfect matchings is a Pfaffian:\n",
+    "\n",
+    "$$\n",
+    "Z = |\\mathrm{Pf}(K)|,\n",
+    "$$\n",
+    "\n",
+    "where $K$ is the *Kasteleyn matrix*: a skew-symmetric adjacency matrix whose signs are chosen so that every\n",
+    "matching contributes with the same sign. For the grid, horizontal edges get $+1$ and vertical edges get\n",
+    "$(-1)^c$, where $c$ is the column.\n",
+    "\n",
+    "With edge weights $w_e$, $Z(w) = |\\mathrm{Pf}(K(w))|$ is the partition function of the dimer model, and the\n",
+    "probability that edge $e$ belongs to a random tiling is a derivative,\n",
+    "\n",
+    "$$\n",
+    "P(e) = w_e \\frac{\\partial \\log Z}{\\partial w_e},\n",
+    "$$\n",
+    "\n",
+    "which autograd computes for every edge in a single backward pass."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "16fe1c1d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import math\n",
+    "\n",
+    "import matplotlib.pyplot as plt\n",
+    "import torch\n",
+    "\n",
+    "from torch_pfaffian import pfaffian, slog_pfaffian"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "6714d8fb",
+   "metadata": {},
+   "source": [
+    "## The Kasteleyn matrix\n",
+    "\n",
+    "The function below builds $K$ from the horizontal weights, of shape `(..., R, C - 1)`, and the vertical\n",
+    "weights, of shape `(..., R - 1, C)`. It accepts any leading batch shape and is differentiable in the\n",
+    "weights."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "5fe24e3d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def kasteleyn_matrix(horizontal: torch.Tensor, vertical: torch.Tensor) -> torch.Tensor:\n",
+    "    rows, columns = vertical.shape[-2] + 1, horizontal.shape[-1] + 1\n",
+    "    site = torch.arange(rows * columns).reshape(rows, columns)\n",
+    "    batch_shape = horizontal.shape[:-2]\n",
+    "    matrix = horizontal.new_zeros(*batch_shape, rows * columns, rows * columns)\n",
+    "    signs = (-1.0) ** torch.arange(columns, dtype=vertical.dtype)  # Kasteleyn signs of the vertical edges\n",
+    "    for start, end, weights in [\n",
+    "        (site[:, :-1], site[:, 1:], horizontal),\n",
+    "        (site[:-1, :], site[1:, :], vertical * signs),\n",
+    "    ]:\n",
+    "        matrix[..., start.flatten(), end.flatten()] = weights.flatten(-2)\n",
+    "        matrix[..., end.flatten(), start.flatten()] = -weights.flatten(-2)\n",
+    "    return matrix\n",
+    "\n",
+    "\n",
+    "def uniform_weights(rows: int, columns: int) -> tuple[torch.Tensor, torch.Tensor]:\n",
+    "    horizontal = torch.ones(rows, columns - 1, dtype=torch.float64)\n",
+    "    vertical = torch.ones(rows - 1, columns, dtype=torch.float64)\n",
+    "    return horizontal, vertical"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9bcc9da3",
+   "metadata": {},
+   "source": [
+    "## Counting tilings\n",
+    "\n",
+    "The number of tilings of a few boards, compared with the known values (OEIS A099390). A board with an odd\n",
+    "number of squares has no tiling, and its Kasteleyn matrix has an odd dimension, whose Pfaffian is 0."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "07157534",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "known = {(2, 2): 2, (2, 10): 89, (3, 3): 0, (3, 4): 11, (4, 4): 36, (6, 6): 6728, (8, 8): 12988816}\n",
+    "for (rows, columns), expected in known.items():\n",
+    "    count = pfaffian(kasteleyn_matrix(*uniform_weights(rows, columns))).abs().item()\n",
+    "    print(f\"{rows} x {columns}: {round(count):>10d} tilings (expected {expected})\")\n",
+    "    assert round(count) == expected"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9f53a026",
+   "metadata": {},
+   "source": [
+    "The count grows like $e^{G R C / \\pi}$, with $G \\approx 0.916$ Catalan's constant, so it soon\n",
+    "exceeds the range of `float64` even though the Pfaffian of a moderate matrix is easy to compute.\n",
+    "`slog_pfaffian` works in the log domain and returns $\\log Z$ directly. The free energy per square,\n",
+    "$\\log Z / (R C)$, approaches $G / \\pi$ as the board grows; the difference is the boundary contribution,\n",
+    "which decreases like $1 / L$."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "2122d9eb",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "catalan = 0.915965594177219015054603514932\n",
+    "sizes = [8, 16, 24, 32, 40]\n",
+    "free_energies = []\n",
+    "for size in sizes:\n",
+    "    _, log_count = slog_pfaffian(kasteleyn_matrix(*uniform_weights(size, size)))\n",
+    "    free_energies.append(log_count.item() / size**2)\n",
+    "    print(f\"{size:>2d} x {size:<2d}: log Z = {log_count.item():8.2f}, log Z / L^2 = {free_energies[-1]:.5f}\")\n",
+    "print(f\"G / pi = {catalan / math.pi:.5f}\")\n",
+    "\n",
+    "plt.plot([1 / size for size in sizes], free_energies, \"o-\", label=\"log Z / L^2\")\n",
+    "plt.axhline(catalan / math.pi, color=\"gray\", linestyle=\"--\", label=\"G / pi\")\n",
+    "plt.xlabel(\"1 / L\")\n",
+    "plt.ylabel(\"free energy per square\")\n",
+    "plt.legend()\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9a09f986",
+   "metadata": {},
+   "source": [
+    "## Dimer probabilities from the gradient\n",
+    "\n",
+    "The gradient of $\\log Z$ with respect to the weights, at $w = 1$, gives the probability that each edge\n",
+    "carries a domino. Every square is covered exactly once, so the probabilities of the edges around a square\n",
+    "sum to 1, which the cell checks."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "e59bee14",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rows, columns = 8, 8\n",
+    "horizontal, vertical = (weights.requires_grad_(True) for weights in uniform_weights(rows, columns))\n",
+    "_, log_count = slog_pfaffian(kasteleyn_matrix(horizontal, vertical))\n",
+    "log_count.backward()\n",
+    "horizontal_probability = (horizontal * horizontal.grad).detach()\n",
+    "vertical_probability = (vertical * vertical.grad).detach()\n",
+    "\n",
+    "coverage = torch.zeros(rows, columns, dtype=torch.float64)\n",
+    "coverage[:, :-1] += horizontal_probability\n",
+    "coverage[:, 1:] += horizontal_probability\n",
+    "coverage[:-1, :] += vertical_probability\n",
+    "coverage[1:, :] += vertical_probability\n",
+    "print(f\"coverage of each square: min {coverage.min():.15f}, max {coverage.max():.15f}\")\n",
+    "assert torch.allclose(coverage, torch.ones_like(coverage))\n",
+    "\n",
+    "figure, axes = plt.subplots(1, 2, figsize=(8, 4))\n",
+    "for axis, probability, title in zip(\n",
+    "    axes, [horizontal_probability, vertical_probability], [\"horizontal dominoes\", \"vertical dominoes\"]\n",
+    "):\n",
+    "    image = axis.imshow(probability, vmin=0, vmax=0.5, cmap=\"viridis\")\n",
+    "    axis.set_title(title)\n",
+    "figure.colorbar(image, ax=axes, shrink=0.8, label=\"probability\")\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "24a19d56",
+   "metadata": {},
+   "source": [
+    "Near the corners the dominoes are strongly ordered: a corner square is covered by a horizontal or a\n",
+    "vertical domino with probability $1/2$ each, while the probabilities in the bulk tend to $1/4$.\n",
+    "\n",
+    "## Many weightings at once\n",
+    "\n",
+    "Every function takes a leading batch dimension. Here 256 random weightings of the $8 \\times 8$ board are\n",
+    "evaluated in one call, and their edge probabilities in one backward pass. On a GPU, moving the weights with\n",
+    "`.cuda()` is the only change."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "ad06ef0c",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "generator = torch.Generator().manual_seed(0)\n",
+    "horizontal = torch.rand(256, rows, columns - 1, dtype=torch.float64, generator=generator).requires_grad_(True)\n",
+    "vertical = torch.rand(256, rows - 1, columns, dtype=torch.float64, generator=generator).requires_grad_(True)\n",
+    "_, log_partition = slog_pfaffian(kasteleyn_matrix(horizontal, vertical))\n",
+    "log_partition.sum().backward()\n",
+    "corner = horizontal[:, 0, 0] * horizontal.grad[:, 0, 0] + vertical[:, 0, 0] * vertical.grad[:, 0, 0]\n",
+    "print(\n",
+    "    log_partition.shape,\n",
+    "    \"partition functions; corner coverage:\",\n",
+    "    torch.allclose(corner, torch.ones(256, dtype=torch.float64)),\n",
+    ")"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

@@ -1,0 +1,1133 @@
+
+
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Performance &mdash; TorchPfaffian  documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/custom.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Limitations" href="limitations.html" />
+    <link rel="prev" title="Domino tilings and dimer probabilities" href="notebooks/domino_tilings.html" /> 
+
+</head>
+
+<body>
+    <header>
+        <div class="container">
+            <a class="site-nav-toggle hidden-lg-up"><i class="icon-menu"></i></a>
+            <a class="site-title" href="index.html">
+                TorchPfaffian
+            </a>
+        </div>
+    </header>
+
+
+<div class="breadcrumbs-outer hidden-xs-down">
+    <div class="container">
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="breadcrumbs">
+    
+      <li><a href="index.html">Docs</a></li>
+        
+      <li>Performance</li>
+    
+    
+      <li class="breadcrumbs-aside">
+        
+            
+            <a href="sources/performance.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+</div>
+    </div>
+</div>
+    <div class="main-outer">
+        <div class="container">
+            <div class="row">
+                <div class="col-12 col-lg-3 site-nav">
+                    
+<div role="search">
+    <form class="search" action="search.html" method="get">
+        <div class="icon-input">
+            <input type="text" name="q" placeholder="Search" />
+            <span class="icon-search"></span>
+        </div>
+        <input type="submit" value="Go" class="d-hidden" />
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+                    <div class="site-nav-tree">
+                        
+                            
+                            
+                                <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="readme.html">TorchPfaffian: PyTorch-Based Pfaffian Computation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#description">Description</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#statement-of-need">Statement of need</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#usage">Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#important-links">Important Links</a></li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#found-a-bug-have-a-question-or-a-feature-request">Found a bug, have a question or a feature request?</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#license">License</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#citation">Citation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#related-software">Related software</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="notebooks/tutorial.html">The <code class="docutils literal notranslate"><span class="pre">pfaffian</span></code> function</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-a-single-skew-symmetric-matrix">Input: a single skew-symmetric matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-a-batch-of-matrices">Input: a batch of matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-dtype-real-or-complex">Input dtype: real or complex</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#output-signed-value-or-magnitude">Output: signed value or magnitude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#output-differentiable">Output: differentiable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/domino_tilings.html">Domino tilings and dimer probabilities</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#the-kasteleyn-matrix">The Kasteleyn matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#counting-tilings">Counting tilings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#dimer-probabilities-from-the-gradient">Dimer probabilities from the gradient</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#many-weightings-at-once">Many weightings at once</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Performance</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#full-pfaffians">Full Pfaffians</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#pfaffian-ratios-under-low-rank-updates">Pfaffian ratios under low-rank updates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#reading-the-results">Reading the results</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="limitations.html">Limitations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#input-assumptions">Input assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#supported-dtypes-and-half-precision">Supported dtypes and half precision</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#torch-func-transforms"><code class="docutils literal notranslate"><span class="pre">torch.func</span></code> transforms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#thread-count-and-mkl">Thread count and MKL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#derivatives-at-singular-matrices">Derivatives at singular matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#tiny-pivots">Tiny pivots</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#devices-and-platforms">Devices and platforms</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Modules:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="torch_pfaffian.html">torch_pfaffian package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#subpackages">Subpackages</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian.utils">torch_pfaffian.utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+                            
+                        
+                    </div>
+                </div>
+                <div class="col-12 col-lg-9">
+                    <div class="document">
+                        
+                            
+  <section id="performance">
+<h1>Performance<a class="headerlink" href="#performance" title="Permalink to this heading">¶</a></h1>
+<p>This page compares TorchPfaffian with three other libraries, on CPU and on a GPU:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/basnijholt/pfapack">pfapack</a>, the reference Pfaffian library (NumPy, one matrix at a
+time, double precision, no gradients or GPU); its C implementation is used;</p></li>
+<li><p><a class="reference external" href="https://github.com/Nuclear-Physics-with-Machine-Learning/PyPfaffian">torchpfaff</a>, a differentiable
+PyTorch Pfaffian with a Triton kernel on CUDA, for real matrices;</p></li>
+<li><p><a class="reference external" href="https://github.com/ChenAo-Phys/lrux">lrux</a>, JAX low-rank updates of determinants and Pfaffians, whose full
+Pfaffian comes from <a class="reference external" href="https://github.com/ChenAo-Phys/fermix">fermix</a> (JAX/Pallas kernels on GPU, a generic
+<code class="docutils literal notranslate"><span class="pre">jax.numpy</span></code> fallback on CPU), jitted.</p></li>
+</ul>
+<p>Every library computes the signed Pfaffian of the same random skew-symmetric matrices, scaled so that <code class="docutils literal notranslate"><span class="pre">|Pf|</span></code>
+stays near 1, and agrees with pfapack. The times are per matrix: for a batch, the time of the whole batch divided
+by its size; pfapack is called on each matrix, the others take the batch in one call. “+ gradient” includes the
+backward pass. The fastest library of each row is in bold, and “—” means not measured: torchpfaff has no complex
+support and its CUDA kernel is not run above <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">64</span></code> (it compiles for minutes), and pfapack has no gradient.
+A method whose first call takes more than 10 s is timed from that call, compilation included (torchpfaff on CUDA
+at <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">64</span></code>), and skipped on every larger input (lrux’s complex gradient on CUDA, above <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">8</span></code>).</p>
+<p>Measured with torchpfaffian 0.0.6 (development build), torch 2.15.0+cu132, numpy 2.5.4, pfapack 1.1.1,
+torchpfaff 0.2.0, lrux 0.2.0 (fermix 0.1.0, jax 0.12.0.1), Python 3.12.16 on Linux x86_64 (AMD Ryzen 9 3900X),
+one CPU thread, and an NVIDIA GeForce RTX 3070 (CUDA 13.2, Triton 3.9.0). Times on another machine differ;
+<code class="docutils literal notranslate"><span class="pre">benchmarks/library_comparison.py</span></code> reproduces the measurement and <code class="docutils literal notranslate"><span class="pre">benchmarks/plot_results.py</span></code> plots it (see
+<code class="docutils literal notranslate"><span class="pre">benchmarks/README.md</span></code>).</p>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this heading">¶</a></h2>
+<p>Each library at its best method on each input and device, divided by the fastest library there (1x is the best),
+against the input size; time on the left, peak memory per call on the right, CPU above and CUDA below. Over all
+the inputs, full Pfaffians and low-rank ratios, TorchPfaffian is the fastest on 49% of the CPU inputs and 42% of
+the CUDA ones, at a geometric mean of 1.3x and 1.5x of the fastest; lrux on 37% and 55%, at 1.9x and 1.5x.</p>
+<a class="reference internal image-reference" href="_images/benchmark_overview.png"><img alt="Time and peak memory of each library relative to the fastest one, on CPU and CUDA." src="_images/benchmark_overview.png" style="width: 100%;" /></a>
+</section>
+<section id="full-pfaffians">
+<h2>Full Pfaffians<a class="headerlink" href="#full-pfaffians" title="Permalink to this heading">¶</a></h2>
+<p>Pfaffian, float64:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>m</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), CPU</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>torchpfaff, CPU</p></th>
+<th class="head"><p>torchpfaff, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>8</p></td>
+<td><p>1</p></td>
+<td><p><strong>8.1 µs</strong></p></td>
+<td><p>22.7 µs</p></td>
+<td><p>73.2 µs</p></td>
+<td><p>569.3 µs</p></td>
+<td><p>128.0 µs</p></td>
+<td><p>14.7 µs</p></td>
+<td><p>233.3 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>256</p></td>
+<td><p>7.4 µs</p></td>
+<td><p>0.9 µs</p></td>
+<td><p>1.6 µs</p></td>
+<td><p>5.4 µs</p></td>
+<td><p><strong>0.7 µs</strong></p></td>
+<td><p>0.7 µs</p></td>
+<td><p>1.8 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>16</p></td>
+<td><p>1</p></td>
+<td><p><strong>9.0 µs</strong></p></td>
+<td><p>24.1 µs</p></td>
+<td><p>78.0 µs</p></td>
+<td><p>1.11 ms</p></td>
+<td><p>139.4 µs</p></td>
+<td><p>22.9 µs</p></td>
+<td><p>230.0 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>16</p></td>
+<td><p>256</p></td>
+<td><p>8.2 µs</p></td>
+<td><p>2.0 µs</p></td>
+<td><p>1.6 µs</p></td>
+<td><p>22.9 µs</p></td>
+<td><p><strong>1.2 µs</strong></p></td>
+<td><p>4.6 µs</p></td>
+<td><p>1.7 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p><strong>11.4 µs</strong></p></td>
+<td><p>27.9 µs</p></td>
+<td><p>83.9 µs</p></td>
+<td><p>2.20 ms</p></td>
+<td><p>230.7 µs</p></td>
+<td><p>52.5 µs</p></td>
+<td><p>231.0 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>256</p></td>
+<td><p>10.5 µs</p></td>
+<td><p>6.2 µs</p></td>
+<td><p>1.9 µs</p></td>
+<td><p>122.0 µs</p></td>
+<td><p>3.3 µs</p></td>
+<td><p>34.0 µs</p></td>
+<td><p><strong>1.7 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>64</p></td>
+<td><p>1</p></td>
+<td><p><strong>21.3 µs</strong></p></td>
+<td><p>45.1 µs</p></td>
+<td><p>104.7 µs</p></td>
+<td><p>4.56 ms</p></td>
+<td><p>832.0 µs</p></td>
+<td><p>294.3 µs</p></td>
+<td><p>375.8 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>64</p></td>
+<td><p>256</p></td>
+<td><p>22.4 µs</p></td>
+<td><p>26.0 µs</p></td>
+<td><p>5.4 µs</p></td>
+<td><p>1.07 ms</p></td>
+<td><p>15.5 µs</p></td>
+<td><p>406.5 µs</p></td>
+<td><p><strong>4.3 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p><strong>101.3 µs</strong></p></td>
+<td><p>167.7 µs</p></td>
+<td><p>287.7 µs</p></td>
+<td><p>10.68 ms</p></td>
+<td><p>—</p></td>
+<td><p>2.58 ms</p></td>
+<td><p>763.5 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>256</p></td>
+<td><p>107.0 µs</p></td>
+<td><p>142.0 µs</p></td>
+<td><p>19.2 µs</p></td>
+<td><p>36.57 ms</p></td>
+<td><p>—</p></td>
+<td><p>4.11 ms</p></td>
+<td><p><strong>13.3 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>256</p></td>
+<td><p>1</p></td>
+<td><p><strong>852.0 µs</strong></p></td>
+<td><p>866.8 µs</p></td>
+<td><p>1.04 ms</p></td>
+<td><p>32.93 ms</p></td>
+<td><p>—</p></td>
+<td><p>28.58 ms</p></td>
+<td><p>2.20 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p>256</p></td>
+<td><p>256</p></td>
+<td><p>875.8 µs</p></td>
+<td><p>1.10 ms</p></td>
+<td><p>107.2 µs</p></td>
+<td><p>285.49 ms</p></td>
+<td><p>—</p></td>
+<td><p>40.01 ms</p></td>
+<td><p><strong>54.1 µs</strong></p></td>
+</tr>
+</tbody>
+</table>
+<p>Pfaffian, complex128:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>m</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), CPU</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>8</p></td>
+<td><p>1</p></td>
+<td><p>14.9 µs</p></td>
+<td><p>23.7 µs</p></td>
+<td><p>72.4 µs</p></td>
+<td><p><strong>9.5 µs</strong></p></td>
+<td><p>344.8 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>256</p></td>
+<td><p>12.5 µs</p></td>
+<td><p>1.4 µs</p></td>
+<td><p>1.8 µs</p></td>
+<td><p><strong>1.3 µs</strong></p></td>
+<td><p>3.5 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>16</p></td>
+<td><p>1</p></td>
+<td><p><strong>15.8 µs</strong></p></td>
+<td><p>24.8 µs</p></td>
+<td><p>77.0 µs</p></td>
+<td><p>22.3 µs</p></td>
+<td><p>338.5 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>16</p></td>
+<td><p>256</p></td>
+<td><p>14.9 µs</p></td>
+<td><p>3.9 µs</p></td>
+<td><p>4.7 µs</p></td>
+<td><p>10.7 µs</p></td>
+<td><p><strong>3.5 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p><strong>22.4 µs</strong></p></td>
+<td><p>36.5 µs</p></td>
+<td><p>88.4 µs</p></td>
+<td><p>84.3 µs</p></td>
+<td><p>346.1 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>256</p></td>
+<td><p>22.0 µs</p></td>
+<td><p>13.9 µs</p></td>
+<td><p>18.0 µs</p></td>
+<td><p>76.8 µs</p></td>
+<td><p><strong>3.5 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>64</p></td>
+<td><p>1</p></td>
+<td><p><strong>69.5 µs</strong></p></td>
+<td><p>101.3 µs</p></td>
+<td><p>160.5 µs</p></td>
+<td><p>538.3 µs</p></td>
+<td><p>631.4 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>64</p></td>
+<td><p>256</p></td>
+<td><p>71.4 µs</p></td>
+<td><p>91.8 µs</p></td>
+<td><p>96.9 µs</p></td>
+<td><p>1.07 ms</p></td>
+<td><p><strong>9.7 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p><strong>442.2 µs</strong></p></td>
+<td><p>595.2 µs</p></td>
+<td><p>729.6 µs</p></td>
+<td><p>4.33 ms</p></td>
+<td><p>1.79 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>256</p></td>
+<td><p>453.4 µs</p></td>
+<td><p>592.5 µs</p></td>
+<td><p>112.7 µs</p></td>
+<td><p>8.70 ms</p></td>
+<td><p><strong>51.1 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>256</p></td>
+<td><p>1</p></td>
+<td><p><strong>3.42 ms</strong></p></td>
+<td><p>4.85 ms</p></td>
+<td><p>5.12 ms</p></td>
+<td><p>51.44 ms</p></td>
+<td><p>10.78 s</p></td>
+</tr>
+<tr class="row-odd"><td><p>256</p></td>
+<td><p>256</p></td>
+<td><p>3.47 ms</p></td>
+<td><p>5.43 ms</p></td>
+<td><p><strong>742.4 µs</strong></p></td>
+<td><p>—</p></td>
+<td><p>—</p></td>
+</tr>
+</tbody>
+</table>
+<p>Pfaffian + gradient, float64:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>m</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>torchpfaff, CPU</p></th>
+<th class="head"><p>torchpfaff, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>8</p></td>
+<td><p>1</p></td>
+<td><p>152.8 µs</p></td>
+<td><p>304.9 µs</p></td>
+<td><p>718.0 µs</p></td>
+<td><p>497.4 µs</p></td>
+<td><p><strong>33.9 µs</strong></p></td>
+<td><p>341.0 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>256</p></td>
+<td><p>3.0 µs</p></td>
+<td><p>4.7 µs</p></td>
+<td><p>6.9 µs</p></td>
+<td><p><strong>1.9 µs</strong></p></td>
+<td><p>2.2 µs</p></td>
+<td><p>2.8 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>16</p></td>
+<td><p>1</p></td>
+<td><p>165.3 µs</p></td>
+<td><p>316.7 µs</p></td>
+<td><p>1.27 ms</p></td>
+<td><p>509.7 µs</p></td>
+<td><p><strong>52.0 µs</strong></p></td>
+<td><p>331.4 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>16</p></td>
+<td><p>256</p></td>
+<td><p>7.7 µs</p></td>
+<td><p>5.0 µs</p></td>
+<td><p>26.9 µs</p></td>
+<td><p><strong>2.6 µs</strong></p></td>
+<td><p>10.5 µs</p></td>
+<td><p>2.9 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p>180.2 µs</p></td>
+<td><p>342.4 µs</p></td>
+<td><p>2.37 ms</p></td>
+<td><p>586.7 µs</p></td>
+<td><p><strong>97.5 µs</strong></p></td>
+<td><p>331.7 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>256</p></td>
+<td><p>28.4 µs</p></td>
+<td><p>6.4 µs</p></td>
+<td><p>160.9 µs</p></td>
+<td><p>6.4 µs</p></td>
+<td><p>64.1 µs</p></td>
+<td><p><strong>2.8 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>64</p></td>
+<td><p>1</p></td>
+<td><p><strong>300.1 µs</strong></p></td>
+<td><p>465.6 µs</p></td>
+<td><p>4.79 ms</p></td>
+<td><p>1.23 ms</p></td>
+<td><p>404.4 µs</p></td>
+<td><p>592.0 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>64</p></td>
+<td><p>256</p></td>
+<td><p>146.4 µs</p></td>
+<td><p>21.4 µs</p></td>
+<td><p>1.75 ms</p></td>
+<td><p>26.5 µs</p></td>
+<td><p>741.5 µs</p></td>
+<td><p><strong>9.0 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p><strong>1.14 ms</strong></p></td>
+<td><p>1.25 ms</p></td>
+<td><p>11.19 ms</p></td>
+<td><p>—</p></td>
+<td><p>3.25 ms</p></td>
+<td><p>1.26 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>256</p></td>
+<td><p>1.03 ms</p></td>
+<td><p>156.7 µs</p></td>
+<td><p>37.67 ms</p></td>
+<td><p>—</p></td>
+<td><p>6.23 ms</p></td>
+<td><p><strong>34.9 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>256</p></td>
+<td><p>1</p></td>
+<td><p>4.56 ms</p></td>
+<td><p><strong>3.02 ms</strong></p></td>
+<td><p>36.02 ms</p></td>
+<td><p>—</p></td>
+<td><p>31.66 ms</p></td>
+<td><p>3.41 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p>256</p></td>
+<td><p>256</p></td>
+<td><p>7.98 ms</p></td>
+<td><p>795.8 µs</p></td>
+<td><p>289.95 ms</p></td>
+<td><p>—</p></td>
+<td><p>31.75 ms</p></td>
+<td><p><strong>168.1 µs</strong></p></td>
+</tr>
+</tbody>
+</table>
+<p>Pfaffian + gradient, complex128:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>m</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>8</p></td>
+<td><p>1</p></td>
+<td><p>198.4 µs</p></td>
+<td><p>367.5 µs</p></td>
+<td><p><strong>37.7 µs</strong></p></td>
+<td><p>10.30 s</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>256</p></td>
+<td><p>6.5 µs</p></td>
+<td><p>5.5 µs</p></td>
+<td><p><strong>4.1 µs</strong></p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-even"><td><p>16</p></td>
+<td><p>1</p></td>
+<td><p>214.0 µs</p></td>
+<td><p>387.5 µs</p></td>
+<td><p><strong>48.0 µs</strong></p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>16</p></td>
+<td><p>256</p></td>
+<td><p>25.6 µs</p></td>
+<td><p><strong>8.9 µs</strong></p></td>
+<td><p>23.2 µs</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p>314.6 µs</p></td>
+<td><p>479.0 µs</p></td>
+<td><p><strong>162.0 µs</strong></p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>256</p></td>
+<td><p>138.2 µs</p></td>
+<td><p><strong>28.0 µs</strong></p></td>
+<td><p>161.9 µs</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-even"><td><p>64</p></td>
+<td><p>1</p></td>
+<td><p>1.05 ms</p></td>
+<td><p>1.26 ms</p></td>
+<td><p><strong>955.2 µs</strong></p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>64</p></td>
+<td><p>256</p></td>
+<td><p>933.9 µs</p></td>
+<td><p><strong>137.6 µs</strong></p></td>
+<td><p>1.63 ms</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p>2.78 ms</p></td>
+<td><p><strong>2.44 ms</strong></p></td>
+<td><p>7.04 ms</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>256</p></td>
+<td><p>6.53 ms</p></td>
+<td><p><strong>456.1 µs</strong></p></td>
+<td><p>11.96 ms</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-even"><td><p>256</p></td>
+<td><p>1</p></td>
+<td><p>18.87 ms</p></td>
+<td><p><strong>9.69 ms</strong></p></td>
+<td><p>64.48 ms</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>256</p></td>
+<td><p>256</p></td>
+<td><p>26.09 ms</p></td>
+<td><p><strong>2.64 ms</strong></p></td>
+<td><p>61.06 ms</p></td>
+<td><p>—</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="pfaffian-ratios-under-low-rank-updates">
+<h2>Pfaffian ratios under low-rank updates<a class="headerlink" href="#pfaffian-ratios-under-low-rank-updates" title="Permalink to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">benchmarks/library_comparison.py</span> <span class="pre">--ratios</span></code> times <code class="xref py py-class docutils literal notranslate"><span class="pre">LowRankPfaffian</span></code> and
+<code class="xref py py-class docutils literal notranslate"><span class="pre">PfaffianUpdater</span></code> against lrux’s <code class="docutils literal notranslate"><span class="pre">pf_lru</span></code> and <code class="docutils literal notranslate"><span class="pre">pf_lru_delayed</span></code>, and against
+computing the Pfaffian of the updated matrix with pfapack, in float64 (times per update). “rank 2” is one dense
+update <code class="docutils literal notranslate"><span class="pre">A</span> <span class="pre">-</span> <span class="pre">u</span> <span class="pre">J</span> <span class="pre">u^T</span></code>, “row” one row and column replaced, and “row x16” sixteen successive accepted row
+replacements, with immediate or delayed (<code class="docutils literal notranslate"><span class="pre">T</span> <span class="pre">=</span> <span class="pre">4</span></code>) inverse updates. “ratio + inverse” also updates the inverse,
+which the next move needs.</p>
+<p>rank 2, ratio:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>n</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), new Pfaffian</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p>11.7 µs</p></td>
+<td><p>17.3 µs</p></td>
+<td><p>124.1 µs</p></td>
+<td><p><strong>10.2 µs</strong></p></td>
+<td><p>160.0 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>64</p></td>
+<td><p>11.3 µs</p></td>
+<td><p><strong>0.8 µs</strong></p></td>
+<td><p>2.0 µs</p></td>
+<td><p>0.9 µs</p></td>
+<td><p>2.6 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p>99.7 µs</p></td>
+<td><p>20.1 µs</p></td>
+<td><p>128.1 µs</p></td>
+<td><p><strong>16.9 µs</strong></p></td>
+<td><p>157.0 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>64</p></td>
+<td><p>104.0 µs</p></td>
+<td><p><strong>2.8 µs</strong></p></td>
+<td><p>5.0 µs</p></td>
+<td><p>7.7 µs</p></td>
+<td><p>2.9 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>512</p></td>
+<td><p>1</p></td>
+<td><p>9.67 ms</p></td>
+<td><p><strong>48.4 µs</strong></p></td>
+<td><p>133.2 µs</p></td>
+<td><p>53.0 µs</p></td>
+<td><p>191.6 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>512</p></td>
+<td><p>64</p></td>
+<td><p>9.95 ms</p></td>
+<td><p>81.3 µs</p></td>
+<td><p>60.3 µs</p></td>
+<td><p>68.8 µs</p></td>
+<td><p><strong>10.1 µs</strong></p></td>
+</tr>
+</tbody>
+</table>
+<p>rank 2, ratio + inverse:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>n</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), new Pfaffian</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p><strong>11.7 µs</strong></p></td>
+<td><p>20.9 µs</p></td>
+<td><p>235.1 µs</p></td>
+<td><p>11.8 µs</p></td>
+<td><p>156.5 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>64</p></td>
+<td><p>11.3 µs</p></td>
+<td><p>1.4 µs</p></td>
+<td><p>3.7 µs</p></td>
+<td><p><strong>1.3 µs</strong></p></td>
+<td><p>2.4 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p>99.7 µs</p></td>
+<td><p><strong>29.6 µs</strong></p></td>
+<td><p>236.4 µs</p></td>
+<td><p>36.1 µs</p></td>
+<td><p>152.4 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>64</p></td>
+<td><p>104.0 µs</p></td>
+<td><p>12.6 µs</p></td>
+<td><p>8.4 µs</p></td>
+<td><p>13.6 µs</p></td>
+<td><p><strong>5.0 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>512</p></td>
+<td><p>1</p></td>
+<td><p>9.67 ms</p></td>
+<td><p><strong>125.7 µs</strong></p></td>
+<td><p>321.6 µs</p></td>
+<td><p>372.7 µs</p></td>
+<td><p>221.6 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>512</p></td>
+<td><p>64</p></td>
+<td><p>9.95 ms</p></td>
+<td><p>326.6 µs</p></td>
+<td><p>107.1 µs</p></td>
+<td><p>771.1 µs</p></td>
+<td><p><strong>41.9 µs</strong></p></td>
+</tr>
+</tbody>
+</table>
+<p>row, ratio:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>n</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), new Pfaffian</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p>24.8 µs</p></td>
+<td><p>22.6 µs</p></td>
+<td><p>110.3 µs</p></td>
+<td><p><strong>10.6 µs</strong></p></td>
+<td><p>159.3 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>64</p></td>
+<td><p>11.4 µs</p></td>
+<td><p>0.6 µs</p></td>
+<td><p>1.8 µs</p></td>
+<td><p><strong>0.4 µs</strong></p></td>
+<td><p>2.4 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p>115.9 µs</p></td>
+<td><p>22.8 µs</p></td>
+<td><p>110.5 µs</p></td>
+<td><p><strong>12.3 µs</strong></p></td>
+<td><p>173.9 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>64</p></td>
+<td><p>109.9 µs</p></td>
+<td><p><strong>0.8 µs</strong></p></td>
+<td><p>1.7 µs</p></td>
+<td><p>1.8 µs</p></td>
+<td><p>2.8 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>512</p></td>
+<td><p>1</p></td>
+<td><p>9.66 ms</p></td>
+<td><p><strong>34.3 µs</strong></p></td>
+<td><p>112.3 µs</p></td>
+<td><p>45.7 µs</p></td>
+<td><p>174.8 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>512</p></td>
+<td><p>64</p></td>
+<td><p>10.42 ms</p></td>
+<td><p>2.7 µs</p></td>
+<td><p><strong>1.8 µs</strong></p></td>
+<td><p>53.0 µs</p></td>
+<td><p>7.7 µs</p></td>
+</tr>
+</tbody>
+</table>
+<p>row, ratio + inverse:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>n</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), new Pfaffian</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p>24.8 µs</p></td>
+<td><p>26.6 µs</p></td>
+<td><p>285.5 µs</p></td>
+<td><p><strong>13.2 µs</strong></p></td>
+<td><p>158.8 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>64</p></td>
+<td><p>11.4 µs</p></td>
+<td><p>1.2 µs</p></td>
+<td><p>4.5 µs</p></td>
+<td><p><strong>0.9 µs</strong></p></td>
+<td><p>2.3 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p>115.9 µs</p></td>
+<td><p><strong>34.7 µs</strong></p></td>
+<td><p>283.2 µs</p></td>
+<td><p>46.9 µs</p></td>
+<td><p>160.4 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>64</p></td>
+<td><p>109.9 µs</p></td>
+<td><p>10.8 µs</p></td>
+<td><p>7.0 µs</p></td>
+<td><p>6.4 µs</p></td>
+<td><p><strong>4.8 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>512</p></td>
+<td><p>1</p></td>
+<td><p>9.66 ms</p></td>
+<td><p><strong>109.9 µs</strong></p></td>
+<td><p>301.7 µs</p></td>
+<td><p>212.1 µs</p></td>
+<td><p>192.8 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>512</p></td>
+<td><p>64</p></td>
+<td><p>10.42 ms</p></td>
+<td><p>294.0 µs</p></td>
+<td><p>49.6 µs</p></td>
+<td><p>776.9 µs</p></td>
+<td><p><strong>39.7 µs</strong></p></td>
+</tr>
+</tbody>
+</table>
+<p>row x16, immediate updates:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>n</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), new Pfaffian</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p>21.8 µs</p></td>
+<td><p>29.0 µs</p></td>
+<td><p>273.8 µs</p></td>
+<td><p><strong>19.6 µs</strong></p></td>
+<td><p>117.6 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>64</p></td>
+<td><p>11.3 µs</p></td>
+<td><p>1.3 µs</p></td>
+<td><p>4.2 µs</p></td>
+<td><p><strong>1.2 µs</strong></p></td>
+<td><p>1.9 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p>113.3 µs</p></td>
+<td><p><strong>35.6 µs</strong></p></td>
+<td><p>271.7 µs</p></td>
+<td><p>47.2 µs</p></td>
+<td><p>110.5 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>64</p></td>
+<td><p>105.9 µs</p></td>
+<td><p>11.3 µs</p></td>
+<td><p>4.4 µs</p></td>
+<td><p>13.6 µs</p></td>
+<td><p><strong>2.9 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>512</p></td>
+<td><p>1</p></td>
+<td><p>9.96 ms</p></td>
+<td><p><strong>116.0 µs</strong></p></td>
+<td><p>273.8 µs</p></td>
+<td><p>278.3 µs</p></td>
+<td><p>119.8 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>512</p></td>
+<td><p>64</p></td>
+<td><p>9.91 ms</p></td>
+<td><p>304.5 µs</p></td>
+<td><p>47.9 µs</p></td>
+<td><p>787.5 µs</p></td>
+<td><p><strong>35.5 µs</strong></p></td>
+</tr>
+</tbody>
+</table>
+<p>row x16, delayed updates (T=4):</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>n</p></th>
+<th class="head"><p>batch</p></th>
+<th class="head"><p>pfapack (C), new Pfaffian</p></th>
+<th class="head"><p>TorchPfaffian, CPU</p></th>
+<th class="head"><p>TorchPfaffian, CUDA</p></th>
+<th class="head"><p>lrux, CPU</p></th>
+<th class="head"><p>lrux, CUDA</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>32</p></td>
+<td><p>1</p></td>
+<td><p><strong>21.8 µs</strong></p></td>
+<td><p>24.8 µs</p></td>
+<td><p>443.7 µs</p></td>
+<td><p>77.8 µs</p></td>
+<td><p>197.3 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>32</p></td>
+<td><p>64</p></td>
+<td><p>11.3 µs</p></td>
+<td><p><strong>1.1 µs</strong></p></td>
+<td><p>7.1 µs</p></td>
+<td><p>2.6 µs</p></td>
+<td><p>3.1 µs</p></td>
+</tr>
+<tr class="row-even"><td><p>128</p></td>
+<td><p>1</p></td>
+<td><p>113.3 µs</p></td>
+<td><p><strong>30.4 µs</strong></p></td>
+<td><p>446.5 µs</p></td>
+<td><p>97.7 µs</p></td>
+<td><p>190.9 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>128</p></td>
+<td><p>64</p></td>
+<td><p>105.9 µs</p></td>
+<td><p>7.5 µs</p></td>
+<td><p>8.5 µs</p></td>
+<td><p>28.5 µs</p></td>
+<td><p><strong>3.1 µs</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>512</p></td>
+<td><p>1</p></td>
+<td><p>9.96 ms</p></td>
+<td><p><strong>103.1 µs</strong></p></td>
+<td><p>458.3 µs</p></td>
+<td><p>341.8 µs</p></td>
+<td><p>193.4 µs</p></td>
+</tr>
+<tr class="row-odd"><td><p>512</p></td>
+<td><p>64</p></td>
+<td><p>9.91 ms</p></td>
+<td><p>249.8 µs</p></td>
+<td><p>82.7 µs</p></td>
+<td><p>766.8 µs</p></td>
+<td><p><strong>24.2 µs</strong></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="reading-the-results">
+<h2>Reading the results<a class="headerlink" href="#reading-the-results" title="Permalink to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>On a single matrix on CPU, pfapack is the fastest: TorchPfaffian has a fixed cost of about 13 µs per call
+(checks, dispatch), and its Rust kernel is up to about 1.7x slower than pfapack’s on one large matrix.</p></li>
+<li><p>On a batch of small matrices, TorchPfaffian is faster than pfapack even on one thread, since one call
+amortizes the fixed cost: the typical workload of matchgate simulation.</p></li>
+<li><p>On CUDA, small inputs are computed by the Rust kernel on the host, and larger real ones by one blocked Triton
+kernel per batch. TorchPfaffian is the fastest on every single matrix (73 µs at <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">8</span></code>, against 128 µs for
+torchpfaff and 233 µs for lrux) and on complex batches from <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">128</span></code>. lrux is the fastest on the other
+batches, where fermix’s kernels use the GPU best (this GeForce card has slow float64 arithmetic); on float64
+batches from <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">64</span></code> TorchPfaffian is 1.3 to 2x slower.</p></li>
+<li><p>The gradient costs a few times the forward pass. It is the main reason to use TorchPfaffian or torchpfaff:
+pfapack has none.</p></li>
+<li><p>For low-rank updates on CPU, TorchPfaffian is faster than lrux from <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">=</span> <span class="pre">128</span></code> on most moves, single and
+batched, and on every chain of moves with delayed updates; it is 1.1 to 2.1x slower at <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">=</span> <span class="pre">32</span></code>, and on single
+ratios and batched row replacements with the inverse at <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">=</span> <span class="pre">128</span></code>. On CUDA, lrux is faster on most inputs,
+TorchPfaffian on most batched ratios without the inverse.</p></li>
+</ul>
+</section>
+</section>
+
+
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>    
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'./',
+            VERSION:'',
+            LANGUAGE:'en',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+    <script type="text/javascript" src="static/documentation_options.js"></script>
+    <script type="text/javascript" src="static/doctools.js"></script>
+    <script type="text/javascript" src="static/sphinx_highlight.js"></script>
+    <script type="text/javascript" src="static/js/theme.js"></script>
+  
+    <div class="footer" role="contentinfo">
+        <div class="container">
+            &#169; Copyright 2024, Jérémie Gince.
+        Created using <a href="http://sphinx-doc.org/">Sphinx</a> 6.2.1.
+        </div>
+    </div>  
+
+</body>
+</html>

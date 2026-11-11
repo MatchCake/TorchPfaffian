@@ -1,0 +1,311 @@
+
+
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Limitations &mdash; TorchPfaffian  documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/custom.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="torch_pfaffian package" href="torch_pfaffian.html" />
+    <link rel="prev" title="Performance" href="performance.html" /> 
+
+</head>
+
+<body>
+    <header>
+        <div class="container">
+            <a class="site-nav-toggle hidden-lg-up"><i class="icon-menu"></i></a>
+            <a class="site-title" href="index.html">
+                TorchPfaffian
+            </a>
+        </div>
+    </header>
+
+
+<div class="breadcrumbs-outer hidden-xs-down">
+    <div class="container">
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="breadcrumbs">
+    
+      <li><a href="index.html">Docs</a></li>
+        
+      <li>Limitations</li>
+    
+    
+      <li class="breadcrumbs-aside">
+        
+            
+            <a href="sources/limitations.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+</div>
+    </div>
+</div>
+    <div class="main-outer">
+        <div class="container">
+            <div class="row">
+                <div class="col-12 col-lg-3 site-nav">
+                    
+<div role="search">
+    <form class="search" action="search.html" method="get">
+        <div class="icon-input">
+            <input type="text" name="q" placeholder="Search" />
+            <span class="icon-search"></span>
+        </div>
+        <input type="submit" value="Go" class="d-hidden" />
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+                    <div class="site-nav-tree">
+                        
+                            
+                            
+                                <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="readme.html">TorchPfaffian: PyTorch-Based Pfaffian Computation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#description">Description</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#statement-of-need">Statement of need</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#usage">Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#important-links">Important Links</a></li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#found-a-bug-have-a-question-or-a-feature-request">Found a bug, have a question or a feature request?</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#license">License</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#citation">Citation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#related-software">Related software</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="notebooks/tutorial.html">The <code class="docutils literal notranslate"><span class="pre">pfaffian</span></code> function</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-a-single-skew-symmetric-matrix">Input: a single skew-symmetric matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-a-batch-of-matrices">Input: a batch of matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-dtype-real-or-complex">Input dtype: real or complex</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#output-signed-value-or-magnitude">Output: signed value or magnitude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#output-differentiable">Output: differentiable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/domino_tilings.html">Domino tilings and dimer probabilities</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#the-kasteleyn-matrix">The Kasteleyn matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#counting-tilings">Counting tilings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#dimer-probabilities-from-the-gradient">Dimer probabilities from the gradient</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#many-weightings-at-once">Many weightings at once</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#full-pfaffians">Full Pfaffians</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#pfaffian-ratios-under-low-rank-updates">Pfaffian ratios under low-rank updates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#reading-the-results">Reading the results</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Limitations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#input-assumptions">Input assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#supported-dtypes-and-half-precision">Supported dtypes and half precision</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#torch-func-transforms"><code class="docutils literal notranslate"><span class="pre">torch.func</span></code> transforms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#thread-count-and-mkl">Thread count and MKL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#derivatives-at-singular-matrices">Derivatives at singular matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tiny-pivots">Tiny pivots</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#devices-and-platforms">Devices and platforms</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Modules:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="torch_pfaffian.html">torch_pfaffian package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#subpackages">Subpackages</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian.utils">torch_pfaffian.utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+                            
+                        
+                    </div>
+                </div>
+                <div class="col-12 col-lg-9">
+                    <div class="document">
+                        
+                            
+  <section id="limitations">
+<h1>Limitations<a class="headerlink" href="#limitations" title="Permalink to this heading">¶</a></h1>
+<p>This page lists what TorchPfaffian does not do, or does only partly. Each item says what happens and what
+to use instead. Open issues are linked; please comment there if a limitation blocks you.</p>
+<section id="input-assumptions">
+<h2>Input assumptions<a class="headerlink" href="#input-assumptions" title="Permalink to this heading">¶</a></h2>
+<p>The strategies assume that the input is skew-symmetric (<code class="docutils literal notranslate"><span class="pre">A</span> <span class="pre">==</span> <span class="pre">-A^T</span></code>) and do not check it, so a
+non-skew input gives a meaningless result without an error. Pass <code class="docutils literal notranslate"><span class="pre">check_input=True</span></code> to
+<a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.pfaffian" title="torch_pfaffian.pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch_pfaffian.pfaffian()</span></code></a> to validate the input first (an <code class="docutils literal notranslate"><span class="pre">O(n^2)</span></code> comparison).</p>
+</section>
+<section id="supported-dtypes-and-half-precision">
+<h2>Supported dtypes and half precision<a class="headerlink" href="#supported-dtypes-and-half-precision" title="Permalink to this heading">¶</a></h2>
+<p><a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.pfaffian" title="torch_pfaffian.pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">pfaffian()</span></code></a> and <a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.slog_pfaffian" title="torch_pfaffian.slog_pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">slog_pfaffian()</span></code></a> accept <code class="docutils literal notranslate"><span class="pre">float16</span></code>,
+<code class="docutils literal notranslate"><span class="pre">bfloat16</span></code>, <code class="docutils literal notranslate"><span class="pre">float32</span></code>, <code class="docutils literal notranslate"><span class="pre">float64</span></code>, <code class="docutils literal notranslate"><span class="pre">complex32</span></code>, <code class="docutils literal notranslate"><span class="pre">complex64</span></code> and <code class="docutils literal notranslate"><span class="pre">complex128</span></code> inputs, and raise a
+<code class="docutils literal notranslate"><span class="pre">TypeError</span></code> for any other dtype (integers, booleans, <code class="docutils literal notranslate"><span class="pre">float8</span></code>): convert those first, for example with
+<code class="docutils literal notranslate"><span class="pre">.to(torch.float64)</span></code>.</p>
+<p>PyTorch has no LU factorization in <code class="docutils literal notranslate"><span class="pre">float16</span></code>, <code class="docutils literal notranslate"><span class="pre">bfloat16</span></code> and <code class="docutils literal notranslate"><span class="pre">complex32</span></code>, and every path beyond the
+unrolled kernel for <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">&lt;=</span> <span class="pre">6</span></code> needs one; <code class="docutils literal notranslate"><span class="pre">complex32</span></code> also lacks most arithmetic kernels. These inputs are
+therefore computed in <code class="docutils literal notranslate"><span class="pre">float32</span></code> (<code class="docutils literal notranslate"><span class="pre">complex64</span></code> for <code class="docutils literal notranslate"><span class="pre">complex32</span></code>) with a <code class="docutils literal notranslate"><span class="pre">UserWarning</span></code>, and the result is
+cast back: at every size for <code class="docutils literal notranslate"><span class="pre">complex32</span></code> and in <a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.slog_pfaffian" title="torch_pfaffian.slog_pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">slog_pfaffian()</span></code></a>, and for
+<code class="docutils literal notranslate"><span class="pre">float16</span></code> and <code class="docutils literal notranslate"><span class="pre">bfloat16</span></code> when <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">&gt;</span> <span class="pre">6</span></code>, with <code class="docutils literal notranslate"><span class="pre">mask_roundoff_gradient=True</span></code>, or when the unrolled
+kernel’s result is not finite. Gradients flow back through the cast. Two consequences:</p>
+<ul class="simple">
+<li><p>A Pfaffian that is finite after the upcast but beyond the range of the input dtype (above 65504 in
+<code class="docutils literal notranslate"><span class="pre">float16</span></code>) becomes <code class="docutils literal notranslate"><span class="pre">inf</span></code>, with a <code class="docutils literal notranslate"><span class="pre">RuntimeWarning</span></code> when <code class="docutils literal notranslate"><span class="pre">check_finite=True</span></code>. Use
+<a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.slog_pfaffian" title="torch_pfaffian.slog_pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">slog_pfaffian()</span></code></a> for such inputs.</p></li>
+<li><p>With <code class="docutils literal notranslate"><span class="pre">mask_roundoff_gradient=True</span></code>, the round-off criterion uses the precision of the upcast dtype. A
+Pfaffian that is zero only up to the round-off of an earlier half-precision computation is not masked.</p></li>
+</ul>
+<p>Pass <code class="docutils literal notranslate"><span class="pre">float32</span></code> or <code class="docutils literal notranslate"><span class="pre">complex64</span></code> inputs to avoid the warning. The strategies called directly (for example
+<code class="docutils literal notranslate"><span class="pre">RustPfaffianParlettReid.apply</span></code>) do not upcast. PyTorch itself marks <code class="docutils literal notranslate"><span class="pre">complex32</span></code> as experimental.</p>
+</section>
+<section id="torch-func-transforms">
+<h2><code class="docutils literal notranslate"><span class="pre">torch.func</span></code> transforms<a class="headerlink" href="#torch-func-transforms" title="Permalink to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">grad</span></code> and <code class="docutils literal notranslate"><span class="pre">jacrev</span></code> work everywhere. The other transforms need <code class="docutils literal notranslate"><span class="pre">check_finite=False</span></code>, since the
+default <code class="docutils literal notranslate"><span class="pre">check_finite=True</span></code> branches on the result. With it, <code class="docutils literal notranslate"><span class="pre">vmap</span></code>, <code class="docutils literal notranslate"><span class="pre">jvp</span></code> (forward-mode AD) and
+<code class="docutils literal notranslate"><span class="pre">vmap(grad)</span></code> all work for <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">&lt;=</span> <span class="pre">6</span></code>. For larger matrices, the signed path supports none of them, and
+the magnitude path without <code class="docutils literal notranslate"><span class="pre">epsilon</span></code> supports <code class="docutils literal notranslate"><span class="pre">vmap</span></code> and <code class="docutils literal notranslate"><span class="pre">jvp</span></code> but not <code class="docutils literal notranslate"><span class="pre">vmap(grad)</span></code>. See issue
+<a class="reference external" href="https://github.com/MatchCake/TorchPfaffian/issues/21">#21</a>. Until then, pass batches directly: every
+function already takes any leading batch shape.</p>
+</section>
+<section id="thread-count-and-mkl">
+<h2>Thread count and MKL<a class="headerlink" href="#thread-count-and-mkl" title="Permalink to this heading">¶</a></h2>
+<p>On PyTorch’s MKL builds, a call to <code class="docutils literal notranslate"><span class="pre">torch.set_num_threads(n)</span></code> with <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">&gt;=</span> <span class="pre">2</span></code> (including through
+<code class="docutils literal notranslate"><span class="pre">torch.utils.benchmark.Timer</span></code>, which calls it) corrupts the batched LU factorizations on CPU for the rest
+of the process: from about <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">150</span></code>, every matrix of a batch of two or more that needs row swaps comes out
+wrong. PyTorch splits the batch over its threads, each calling MKL’s <code class="docutils literal notranslate"><span class="pre">getrf</span></code>, which then starts its own
+team of <code class="docutils literal notranslate"><span class="pre">n</span></code> threads, and the nested teams conflict. Determinants and inverses are mostly wrong without an
+error, and sometimes inverses raise <code class="docutils literal notranslate"><span class="pre">RuntimeError:</span> <span class="pre">Pivots</span> <span class="pre">given</span> <span class="pre">to</span> <span class="pre">lu_solve</span> <span class="pre">must</span> <span class="pre">all</span> <span class="pre">be</span> <span class="pre">greater</span> <span class="pre">or</span> <span class="pre">equal</span> <span class="pre">to</span>
+<span class="pre">1</span></code>. The bug is in PyTorch and MKL (<a class="reference external" href="https://github.com/pytorch/pytorch/issues/142815">pytorch/pytorch#142815</a>,
+<a class="reference external" href="https://github.com/pytorch/pytorch/issues/141358">#141358</a>).</p>
+<p>TorchPfaffian’s determinant- and inverse-based paths detect it and raise a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> instead of
+returning wrong values: for a batched LU of at least two CPU matrices of size <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">&gt;=</span> <span class="pre">96</span></code> with more than one
+thread, <a class="reference internal" href="torch_pfaffian.kernels.html#torch_pfaffian.kernels.checked_linalg.CheckedLinalg" title="torch_pfaffian.kernels.checked_linalg.CheckedLinalg"><code class="xref py py-class docutils literal notranslate"><span class="pre">CheckedLinalg</span></code></a> factors a small probe the same way and
+verifies it. The verdict is cached per probe size (<code class="docutils literal notranslate"><span class="pre">min(m,</span> <span class="pre">256)</span></code>), dtype and thread count, so the probe runs
+once for each (about 1 ms) and later calls only look the verdict up. A later <code class="docutils literal notranslate"><span class="pre">torch.set_num_threads</span></code> with
+another count is detected, but one that sets the current count again, which also corrupts the factorizations,
+is not seen once a verdict is cached. Set the thread count with the <code class="docutils literal notranslate"><span class="pre">OMP_NUM_THREADS</span></code> environment variable
+before starting Python instead of calling <code class="docutils literal notranslate"><span class="pre">torch.set_num_threads</span></code>, or call <code class="docutils literal notranslate"><span class="pre">torch.set_num_threads(1)</span></code>. See
+issue <a class="reference external" href="https://github.com/MatchCake/TorchPfaffian/issues/23">#23</a>; the check is to be removed once PyTorch
+fixes the bug (<a class="reference external" href="https://github.com/MatchCake/TorchPfaffian/issues/48">#48</a>).</p>
+</section>
+<section id="derivatives-at-singular-matrices">
+<h2>Derivatives at singular matrices<a class="headerlink" href="#derivatives-at-singular-matrices" title="Permalink to this heading">¶</a></h2>
+<p>The first derivative of the signed Pfaffian is exact at invertible and singular matrices. Second
+derivatives are exact at invertible matrices only: at a singular matrix (<code class="docutils literal notranslate"><span class="pre">Pf(A)</span> <span class="pre">=</span> <span class="pre">0</span></code>), double
+backward through <code class="docutils literal notranslate"><span class="pre">pfaffian(A)</span></code> is not the true second derivative.</p>
+<p>The magnitude <code class="docutils literal notranslate"><span class="pre">|Pf(A)|</span></code> is not differentiable where <code class="docutils literal notranslate"><span class="pre">Pf(A)</span> <span class="pre">=</span> <span class="pre">0</span></code>. Its gradient there comes from
+round-off, unless <code class="docutils literal notranslate"><span class="pre">mask_roundoff_gradient=True</span></code> is passed, which sets it to zero. That mask uses a
+numerical criterion: a genuine Pfaffian of round-off size (about <code class="docutils literal notranslate"><span class="pre">1e-16</span></code> times the scale of the matrix
+in <code class="docutils literal notranslate"><span class="pre">float64</span></code>) is indistinguishable from an exact zero and is masked too. See
+<a class="reference internal" href="torch_pfaffian.strategies.html#torch_pfaffian.strategies.pfaffian_masked_magnitude.PfaffianMaskedMagnitude" title="torch_pfaffian.strategies.pfaffian_masked_magnitude.PfaffianMaskedMagnitude"><code class="xref py py-class docutils literal notranslate"><span class="pre">PfaffianMaskedMagnitude</span></code></a> for the details.</p>
+</section>
+<section id="tiny-pivots">
+<h2>Tiny pivots<a class="headerlink" href="#tiny-pivots" title="Permalink to this heading">¶</a></h2>
+<p>For <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">&gt;</span> <span class="pre">6</span></code> the linear-domain signed path treats a pivot below <code class="docutils literal notranslate"><span class="pre">PfaffianStrategy.EPSILON</span></code>
+(<code class="docutils literal notranslate"><span class="pre">1e-30</span></code>) as an exact zero, so a Pfaffian that hinges on such a pivot is returned as <code class="docutils literal notranslate"><span class="pre">0</span></code>.
+<a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.slog_pfaffian" title="torch_pfaffian.slog_pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch_pfaffian.slog_pfaffian()</span></code></a> uses an exact-zero pivot test and computes these inputs correctly.</p>
+</section>
+<section id="devices-and-platforms">
+<h2>Devices and platforms<a class="headerlink" href="#devices-and-platforms" title="Permalink to this heading">¶</a></h2>
+<p>The Rust kernel runs on CPU only. A small signed CUDA input (<code class="docutils literal notranslate"><span class="pre">batch</span> <span class="pre">*</span> <span class="pre">m^2</span></code> up to <code class="docutils literal notranslate"><span class="pre">2^20</span></code>; for real inputs, when a cost model of both routes,
+which accounts for the host threads, estimates the host faster) is copied to the host,
+computed by the Rust kernel and its Pfaffian copied back, since the elimination on the device is bound by its
+kernel launches at those sizes; this synchronizes with the device, and the backward runs on the device. Larger
+CUDA inputs, and inputs during a CUDA graph capture, use the PyTorch implementation of the same algorithm on the
+device; in <code class="docutils literal notranslate"><span class="pre">float32</span></code> and <code class="docutils literal notranslate"><span class="pre">float64</span></code> its elimination runs as one Triton kernel when Triton is installed (it is,
+with PyTorch’s CUDA wheels), and complex inputs use the PyTorch loop. <a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.slog_pfaffian" title="torch_pfaffian.slog_pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch_pfaffian.slog_pfaffian()</span></code></a> always runs on the device. Prebuilt wheels with the Rust kernel exist for Linux x86_64, Windows x86_64 and macOS arm64;
+on other platforms installing from source needs a Rust toolchain.</p>
+</section>
+</section>
+
+
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>    
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'./',
+            VERSION:'',
+            LANGUAGE:'en',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+    <script type="text/javascript" src="static/documentation_options.js"></script>
+    <script type="text/javascript" src="static/doctools.js"></script>
+    <script type="text/javascript" src="static/sphinx_highlight.js"></script>
+    <script type="text/javascript" src="static/js/theme.js"></script>
+  
+    <div class="footer" role="contentinfo">
+        <div class="container">
+            &#169; Copyright 2024, Jérémie Gince.
+        Created using <a href="http://sphinx-doc.org/">Sphinx</a> 6.2.1.
+        </div>
+    </div>  
+
+</body>
+</html>
