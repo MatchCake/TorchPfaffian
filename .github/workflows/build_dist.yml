@@ -41,6 +41,8 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux
+          - os: ubuntu-24.04-arm
+            target: linux-aarch64
           - os: windows-latest
             target: windows
           - os: macos-latest
@@ -81,8 +83,14 @@ jobs:
         uv run maturin sdist --out dist
         uv run twine check dist/*
 
+    - name: Build manylinux aarch64 wheel
+      if: matrix.target == 'linux-aarch64'
+      run: |
+        uv run maturin build --release --out dist --compatibility manylinux2014 --zig
+        uv run twine check dist/*
+
     - name: Build native wheel
-      if: matrix.target != 'linux'
+      if: ${{ !startsWith(matrix.target, 'linux') }}
       env:
         # Without it, the macOS wheel only installs on the runner's macOS version or newer. 11.0 is the
         # oldest macOS of the PyTorch arm64 wheels. Ignored on Windows.

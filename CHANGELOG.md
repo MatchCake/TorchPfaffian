@@ -28,6 +28,8 @@ changes the package's behaviour, API, documentation or packaging.
 - `benchmarks/library_comparison.py` records the peak memory of each call next to its time, and
   `benchmarks/plot_results.py` plots both against the matrix size, one panel per comparison, and every point
   against the input size in one overview (`--overview`).
+- Linux aarch64 (ARM) support: `uv.lock` resolves for `linux/aarch64` (`required-environments`), a
+  manylinux aarch64 wheel is published, and the tests run on `ubuntu-24.04-arm` (#50).
 
 ### Changed
 

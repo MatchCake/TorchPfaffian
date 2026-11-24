@@ -102,6 +102,9 @@ conflicts = [
         { extra = "cu130" },
     ],
 ]
+required-environments = [
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
 
 [project.optional-dependencies]
 cpu = [
