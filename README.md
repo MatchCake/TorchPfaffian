@@ -89,8 +89,8 @@ fastest on large float64 batches on CUDA. Times depend on the machine: run the s
 ## Requirements
 
 - Python 3.10 to 3.14 and PyTorch 2.1 or newer.
-- Prebuilt wheels with the Rust kernel are published for Linux x86_64, Windows x86_64 and macOS arm64. On
-  other platforms pip builds the package from source, which needs a Rust toolchain
+- Prebuilt wheels with the Rust kernel are published for Linux x86_64, Linux aarch64, Windows x86_64 and
+  macOS arm64. On other platforms pip builds the package from source, which needs a Rust toolchain
   (<https://rustup.rs>).
 
 ## Installation
