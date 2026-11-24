@@ -6,9 +6,11 @@ from torch.autograd import gradcheck
 from tests.configs import (
     ATOL_APPROX_COMPARISON,
     ATOL_MATRIX_COMPARISON,
+    ATOL_SINGLE_PRECISION_COMPARISON,
     N_RANDOM_TESTS_PER_CASE,
     RTOL_APPROX_COMPARISON,
     RTOL_MATRIX_COMPARISON,
+    RTOL_SINGLE_PRECISION_COMPARISON,
     TEST_SEED,
 )
 from torch_pfaffian.strategies.pfaffian_block_det import PfaffianBlockDet
@@ -59,6 +61,26 @@ def _block_antidiagonal_torch(block: torch.Tensor) -> torch.Tensor:
 def _random_complex_skew(dimension: int) -> torch.Tensor:
     entries = _RNG.normal(size=(dimension, dimension)) + 1j * _RNG.normal(size=(dimension, dimension))
     return torch.tensor(entries - entries.T)
+
+
+def _round_off_singular_block(size: int, dtype: torch.dtype, generator: torch.Generator) -> torch.Tensor:
+    # U diag(0, s) V^H is built in double precision and cast to `dtype`. The cast leaves a round-off nonzero
+    # determinant whose pivot ratio is usually, but not always, at most n * eps of `dtype`, so candidates are
+    # drawn until one is singular at round-off level in the sense of PfaffianStrategy._round_off_inverse.
+    wide_dtype = torch.complex128 if dtype.is_complex else torch.float64
+    threshold = size * torch.finfo(dtype).eps
+    singular_values = torch.linspace(0.5, 1.5, size, dtype=torch.float64)
+    singular_values[0] = 0.0
+    for _ in range(100):
+        left, _ = torch.linalg.qr(torch.randn(size, size, dtype=wide_dtype, generator=generator))
+        right, _ = torch.linalg.qr(torch.randn(size, size, dtype=wide_dtype, generator=generator))
+        candidate = ((left * singular_values.to(wide_dtype)) @ right.mH).to(dtype)
+        factors, _, info = torch.linalg.lu_factor_ex(candidate)
+        pivot_magnitude = factors.diagonal().abs()
+        pivot_ratio = pivot_magnitude.amin() / pivot_magnitude.amax()
+        if info == 0 and 0 < pivot_ratio <= threshold:
+            return candidate
+    raise AssertionError(f"no {dtype} block singular at round-off level was found")
 
 
 class TestPfaffianBlockDet:
@@ -286,21 +308,18 @@ class TestPfaffianBlockDet:
             matrix.grad[1, 3:, :3], -expected.T, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
         )
 
-    @pytest.mark.parametrize("dtype", [torch.float64, torch.complex128])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.complex64, torch.float64, torch.complex128])
     def test_exact_singular_grad_false_zeroes_round_off_singular_block(self, dtype, monkeypatch):
         # A rank-deficient block built by rotations has a round-off det (not 0), so testing pf == 0 alone gave
         # det * B^{-1}, round-off times a huge inverse. The sync-free mode now uses the LU pivot ratio too.
         monkeypatch.setattr(PfaffianBlockDet, "EXACT_SINGULAR_GRAD", False)
         generator = torch.Generator().manual_seed(TEST_SEED)
         size = 8
-        left, _ = torch.linalg.qr(torch.randn(size, size, dtype=dtype, generator=generator))
-        right, _ = torch.linalg.qr(torch.randn(size, size, dtype=dtype, generator=generator))
-        singular_values = torch.linspace(0.5, 1.5, size, dtype=torch.float64)
-        singular_values[0] = 0.0
-        singular_block = (left * singular_values.to(dtype)) @ right.mH
-        invertible_block = torch.eye(size, dtype=dtype) + 0.1 * torch.randn(
-            size, size, dtype=dtype, generator=generator
-        )
+        singular_block = _round_off_singular_block(size, dtype, generator)
+        wide_dtype = torch.complex128 if dtype.is_complex else torch.float64
+        invertible_block = (
+            torch.eye(size, dtype=wide_dtype) + 0.1 * torch.randn(size, size, dtype=wide_dtype, generator=generator)
+        ).to(dtype)
         matrix = torch.stack(
             [_block_antidiagonal_torch(singular_block), _block_antidiagonal_torch(invertible_block)]
         ).requires_grad_(True)
@@ -310,13 +329,39 @@ class TestPfaffianBlockDet:
         assert matrix.grad is not None
         assert torch.all(matrix.grad[0] == 0)
         constant = (-1) ** (size * (size - 1) // 2)
+        wide_block = invertible_block.to(wide_dtype)
         expected = (
-            0.5
-            * constant
-            * (torch.linalg.det(invertible_block) * torch.linalg.inv(invertible_block).transpose(-1, -2)).conj()
+            0.5 * constant * (torch.linalg.det(wide_block) * torch.linalg.inv(wide_block).transpose(-1, -2)).conj()
+        )
+        single_precision = dtype in (torch.float32, torch.complex64)
+        atol = ATOL_SINGLE_PRECISION_COMPARISON if single_precision else ATOL_MATRIX_COMPARISON
+        rtol = RTOL_SINGLE_PRECISION_COMPARISON if single_precision else RTOL_MATRIX_COMPARISON
+        torch.testing.assert_close(matrix.grad[1, :size, size:].to(wide_dtype), expected, atol=atol, rtol=rtol)
+
+    @pytest.mark.parametrize("exact_singular_grad", [True, False])
+    def test_graded_invertible_block_in_float32_depends_on_exact_singular_grad(self, exact_singular_grad, monkeypatch):
+        # Documents the trade-off of the sync-free mode: diag(1, 1e-9) is invertible, but its float32 pivot
+        # ratio 1e-9 is below n * eps, so EXACT_SINGULAR_GRAD = False gives it a zero gradient while the
+        # default mode returns the exact cofactor c * adj(B)^T = c * diag(1e-9, 1).
+        monkeypatch.setattr(PfaffianBlockDet, "EXACT_SINGULAR_GRAD", exact_singular_grad)
+        block = torch.diag(torch.tensor([1.0, 1e-9], dtype=torch.float32))
+        matrix = _block_antidiagonal_torch(block).requires_grad_(True)
+        pfaffian = PfaffianBlockDet.apply(matrix)
+        assert pfaffian != 0  # the block is invertible
+        pfaffian.backward()
+        if not exact_singular_grad:
+            assert torch.all(matrix.grad == 0)
+            return
+        constant = (-1) ** (2 * (2 - 1) // 2)
+        expected = 0.5 * constant * torch.diag(torch.tensor([1e-9, 1.0], dtype=torch.float32))
+        torch.testing.assert_close(
+            matrix.grad[:2, 2:], expected, atol=ATOL_SINGLE_PRECISION_COMPARISON, rtol=RTOL_SINGLE_PRECISION_COMPARISON
         )
         torch.testing.assert_close(
-            matrix.grad[1, :size, size:], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON
+            matrix.grad[2:, :2],
+            -expected.T,
+            atol=ATOL_SINGLE_PRECISION_COMPARISON,
+            rtol=RTOL_SINGLE_PRECISION_COMPARISON,
         )
 
     def test_adjugate_override_delegates_to_parlett_reid(self):
