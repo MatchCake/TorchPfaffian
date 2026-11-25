@@ -168,3 +168,47 @@ class TestCheckedLinalg:
         assert len(result) == 1, completed.stdout[-2000:] + completed.stderr[-2000:]
         _, corrupted, raised = result[0].split()
         assert corrupted == raised
+
+    @pytest.mark.parametrize("trailing", [(), (5,), (5, 5)])
+    def test_nan_where_input_has_nan_sets_only_the_nan_matrices(self, trailing):
+        matrices = _batch(torch.float64, size=5, count=3)
+        matrices[1, 2, 3] = torch.nan
+        value = torch.ones((3, *trailing), dtype=torch.float64)
+        result = CheckedLinalg._nan_where_input_has_nan(matrices, value)
+        assert torch.isnan(result[1]).all()
+        torch.testing.assert_close(result[[0, 2]], value[[0, 2]], atol=0.0, rtol=0.0)
+
+    def test_nan_where_input_has_nan_supports_a_single_complex_matrix(self):
+        matrix = torch.eye(4, dtype=torch.complex128)
+        matrix[0, 1] = complex(torch.nan, 0.0)
+        result = CheckedLinalg._nan_where_input_has_nan(matrix, torch.tensor(2.0 + 1.0j, dtype=torch.complex128))
+        assert result.dtype == torch.complex128 and torch.isnan(result)
+
+    def test_propagate_nan_returns_the_cpu_result_itself(self):
+        matrix = torch.full((4, 4), torch.nan, dtype=torch.float64)
+        value = torch.zeros((), dtype=torch.float64)
+        assert CheckedLinalg._propagate_nan(matrix, value) is value
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+    @pytest.mark.parametrize("batch", [(), (1,), (3,)])
+    def test_functions_return_nan_for_a_nan_cuda_matrix(self, batch):  # pragma: no cover - needs a GPU
+        matrices = torch.randn(*batch, 40, 40, dtype=torch.float64, generator=torch.Generator().manual_seed(TEST_SEED))
+        matrices = matrices.cuda()
+        matrices[..., 0, 1] = torch.nan
+        assert torch.isnan(CheckedLinalg.det(matrices)).all()
+        sign, log_abs = CheckedLinalg.slogdet(matrices)
+        assert torch.isnan(sign).all() and torch.isnan(log_abs).all()
+        assert torch.isnan(CheckedLinalg.inv(matrices)).all()
+        assert torch.isnan(CheckedLinalg.inv_ex(matrices)[0]).all()
+        assert torch.isnan(CheckedLinalg.lu_factor_ex(matrices)[0]).all()
+
+    def test_nan_where_input_has_nan_passes_an_empty_matrix_through(self):
+        value = torch.ones(3, dtype=torch.float64)
+        result = CheckedLinalg._nan_where_input_has_nan(torch.zeros(3, 0, 0, dtype=torch.float64), value)
+        assert result is value
+
+    def test_nan_where_input_has_nan_reads_a_conjugated_view(self):
+        matrices = torch.ones(2, 3, 3, dtype=torch.complex128)
+        matrices[0, 1, 2] = complex(1.0, torch.nan)
+        result = CheckedLinalg._nan_where_input_has_nan(matrices.conj(), torch.zeros(2, dtype=torch.complex128))
+        assert torch.isnan(result[0]) and result[1] == 0

@@ -937,7 +937,7 @@ class TestTorchPfaffian:
             result = pfaffian(matrix)
         messages = [str(warning.message) for warning in caught if issubclass(warning.category, RuntimeWarning)]
         assert torch.isnan(result)
-        assert len(messages) == 1 and "not finite after log-domain recovery" in messages[0]
+        assert len(messages) == 1 and "input matrix has NaN or inf entries" in messages[0]
 
     def test_pfaffian_low_precision_forwards_check_finite_false(self):
         matrix = torch.zeros(8, 8, dtype=torch.float16)
@@ -1012,4 +1012,88 @@ class TestTorchPfaffian:
         floored = pfaffian(matrix, sign=False, epsilon=1e-8)
         torch.testing.assert_close(
             floored, torch.tensor(1e-4, dtype=torch.float64), atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON
+        )
+
+    @staticmethod
+    def _skew_batch_with_bad_entry(dimension: int, bad_value: float, count: int = 2) -> torch.Tensor:
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        entries = torch.randn(count, dimension, dimension, dtype=torch.float64, generator=generator)
+        matrix = (entries - entries.mT) / dimension**0.5
+        matrix[0, 0, 3], matrix[0, 3, 0] = bad_value, -bad_value
+        return matrix
+
+    @pytest.mark.parametrize("dimension", [4, 40])
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{}, {"sign": False}, {"sign": False, "epsilon": 1e-20}, {"sign": False, "mask_roundoff_gradient": True}],
+    )
+    @pytest.mark.parametrize("rust", [True, False])
+    def test_pfaffian_nan_input_gives_nan_with_an_input_warning(self, dimension, kwargs, rust, monkeypatch):
+        if not rust:
+            monkeypatch.setattr(torch_pfaffian, "RustPfaffianParlettReid", None)
+        matrix = self._skew_batch_with_bad_entry(dimension, float("nan"))
+        expected = pfaffian(matrix[1], **kwargs)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pfaffian(matrix, **kwargs)
+        messages = [str(warning.message) for warning in caught if issubclass(warning.category, RuntimeWarning)]
+        assert torch.isnan(result[0])
+        torch.testing.assert_close(result[1], expected, atol=ATOL_SCALAR_COMPARISON, rtol=RTOL_SCALAR_COMPARISON)
+        assert messages == ["Pfaffian is not finite because the input matrix has NaN or inf entries."]
+
+    @pytest.mark.parametrize("sign", [True, False])
+    def test_pfaffian_inf_input_warns_about_the_input_only(self, sign):
+        matrix = self._skew_batch_with_bad_entry(40, float("inf"))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pfaffian(matrix, sign=sign)
+        messages = [str(warning.message) for warning in caught if issubclass(warning.category, RuntimeWarning)]
+        assert not torch.isfinite(result[0]) and torch.isfinite(result[1])
+        assert messages == ["Pfaffian is not finite because the input matrix has NaN or inf entries."]
+
+    def test_pfaffian_overflow_next_to_nan_input_warns_about_both(self):
+        overflow = _block_antidiagonal(torch.tensor([[1e200, 0.0], [0.0, 1e200]], dtype=torch.float64))
+        nan_matrix = overflow.clone()
+        nan_matrix[0, 1], nan_matrix[1, 0] = float("nan"), float("nan")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pfaffian(torch.stack([overflow, nan_matrix]))
+        messages = [str(warning.message) for warning in caught if issubclass(warning.category, RuntimeWarning)]
+        assert torch.isinf(result[0]) and torch.isnan(result[1])
+        assert len(messages) == 2
+        assert "genuinely exceeds" in messages[0] and "NaN or inf entries" in messages[1]
+
+    def test_pfaffian_nan_input_is_not_recovered(self, monkeypatch):
+        def _fail(*args, **kwargs):
+            raise AssertionError("a NaN input must not be recovered in the log domain")
+
+        monkeypatch.setattr(torch_pfaffian.SlogSignedPfaffian, "apply", _fail)
+        matrix = self._skew_batch_with_bad_entry(40, float("nan"))
+        with pytest.warns(RuntimeWarning, match="NaN or inf entries"):
+            assert torch.isnan(pfaffian(matrix)[0])
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+    @pytest.mark.parametrize("kwargs", [{}, {"sign": False}, {"sign": False, "epsilon": 1e-20}])
+    @pytest.mark.parametrize(("count", "dimension"), [(1, 40), (1, 300), (64, 128)])
+    def test_pfaffian_nan_cuda_input_gives_nan(self, count, dimension, kwargs):  # pragma: no cover - needs a GPU
+        matrix = self._skew_batch_with_bad_entry(dimension, float("nan"), count=count).cuda()
+        with pytest.warns(RuntimeWarning, match="NaN or inf entries"):
+            result = pfaffian(matrix, **kwargs)
+        assert torch.isnan(result[0])
+        assert torch.isfinite(result[1:]).all()
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+    @pytest.mark.parametrize("kwargs", [{"sign": False}, {"sign": False, "mask_roundoff_gradient": True}])
+    def test_pfaffian_empty_and_conjugated_cuda_inputs(self, kwargs):  # pragma: no cover - needs a GPU
+        torch.testing.assert_close(
+            pfaffian(torch.zeros(0, 0, dtype=torch.float64, device="cuda"), **kwargs),
+            torch.ones((), dtype=torch.float64, device="cuda"),
+        )
+        entries = torch.randn(8, 8, dtype=torch.complex128, generator=torch.Generator().manual_seed(TEST_SEED))
+        matrix = (entries - entries.T).cuda()
+        torch.testing.assert_close(
+            pfaffian(matrix.conj(), **kwargs),
+            pfaffian(matrix.conj().resolve_conj(), **kwargs),
+            atol=ATOL_SCALAR_COMPARISON,
+            rtol=RTOL_SCALAR_COMPARISON,
         )

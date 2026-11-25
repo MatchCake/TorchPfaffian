@@ -110,6 +110,15 @@ changes the package's behaviour, API, documentation or packaging.
 
 ### Fixed
 
+- A NaN entry now gives a NaN Pfaffian on every route. `PfaffianParlettReid` (the CPU loop and the Triton
+  kernel, which `pfaffian()` uses for large CUDA inputs) returned `0`, since its zero-pivot test is `False` for
+  a NaN pivot, and so did an input with two or more inf entries, whose elimination forms `inf - inf`; it now
+  returns NaN for any non-finite input. On CUDA, `torch.linalg.det`, `slogdet`, `inv` and `lu_factor_ex`
+  return finite values for a single matrix with a NaN entry, so the determinant routes returned a plausible
+  wrong magnitude:
+  `CheckedLinalg` now sets those results to NaN off the CPU. `pfaffian()` no longer tries to recover a
+  non-finite input in the log domain, and warns that the input has NaN or inf entries instead of reporting an
+  overflow beyond the dtype's range (#55).
 - `ParlettReidTriton` (CUDA, `float32` and `float64`): a matrix with a zero pivot (`Pf = 0`) in a batch whose
   size `m` is not a power of two made the pivot search return a padding row, whose swap wrote into the next
   matrix of the batch (or past the end of the buffer for the last one), so `pfaffian()` and `slog_pfaffian()`

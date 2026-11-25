@@ -178,3 +178,37 @@ class TestPfaffianParlettReid:
             atol=ATOL_MATRIX_COMPARISON,
             rtol=RTOL_MATRIX_COMPARISON,
         )
+
+    @pytest.mark.parametrize(
+        "device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU"))]
+    )
+    @pytest.mark.parametrize("dimension", [4, 6, 40])
+    def test_forward_nan_input_gives_nan(self, dimension, device):
+        generator = torch.Generator().manual_seed(TEST_SEED)
+        entries = torch.randn(3, dimension, dimension, dtype=torch.float64, generator=generator)
+        matrix = (entries - entries.mT).to(device)
+        matrix[0, 0, 3], matrix[0, 3, 0] = torch.nan, torch.nan
+        matrix[2] = 0.0
+        expected = PfaffianParlettReid.forward(matrix[1:2].clone())
+        pfaffian = PfaffianParlettReid.forward(matrix)
+        assert torch.isnan(pfaffian[0])
+        torch.testing.assert_close(pfaffian[1:2], expected, atol=ATOL_MATRIX_COMPARISON, rtol=RTOL_MATRIX_COMPARISON)
+        assert pfaffian[2] == 0
+
+    @pytest.mark.parametrize("pairs", [((0, 3),), ((0, 3), (0, 4)), ((0, 3), (1, 5), (2, 6))])
+    def test_forward_inf_input_is_not_finite(self, pairs):
+        matrix = torch.tensor(_RNG.normal(size=(40, 40)))
+        matrix = matrix - matrix.T
+        for row, column in pairs:
+            matrix[row, column], matrix[column, row] = torch.inf, -torch.inf
+        assert not torch.isfinite(PfaffianParlettReid.forward(matrix))
+
+    def test_forward_conjugated_complex_input_matches_resolved(self):
+        entries = torch.tensor(_RNG.normal(size=(8, 8)) + 1j * _RNG.normal(size=(8, 8)))
+        matrix = entries - entries.T
+        torch.testing.assert_close(
+            PfaffianParlettReid.forward(matrix.conj()),
+            PfaffianParlettReid.forward(matrix.conj().resolve_conj()),
+            atol=0.0,
+            rtol=0.0,
+        )

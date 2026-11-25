@@ -28,6 +28,11 @@ class CheckedLinalg:
 
     This is a workaround to remove once PyTorch fixes the issues
     (https://github.com/MatchCake/TorchPfaffian/issues/48).
+
+    On CUDA, the factorization of a single matrix (a batch of one) ignores a NaN entry: ``det``, ``slogdet``,
+    ``inv`` and ``lu_factor_ex`` return finite values for it, where the CPU and batches of two or more return NaN
+    (measured with PyTorch 2.10 and CUDA 13). On every device other than the CPU, the results of the matrices with
+    a NaN entry are therefore set to NaN, so a NaN input gives a NaN output everywhere (#55).
     """
 
     # Smallest size checked. The corruption starts at about m = 150, where MKL's getrf starts a team of threads
@@ -81,7 +86,7 @@ class CheckedLinalg:
         :raises RuntimeError: See :meth:`check`.
         """
         CheckedLinalg.check(matrix)
-        return torch.linalg.det(matrix)
+        return CheckedLinalg._propagate_nan(matrix, torch.linalg.det(matrix))
 
     @staticmethod
     def slogdet(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -96,7 +101,7 @@ class CheckedLinalg:
         """
         CheckedLinalg.check(matrix)
         sign, log_abs = torch.linalg.slogdet(matrix)
-        return sign, log_abs
+        return CheckedLinalg._propagate_nan(matrix, sign), CheckedLinalg._propagate_nan(matrix, log_abs)
 
     @staticmethod
     def inv(matrix: torch.Tensor) -> torch.Tensor:
@@ -109,7 +114,7 @@ class CheckedLinalg:
         :raises RuntimeError: See :meth:`check`, or as :func:`torch.linalg.inv` on a singular input.
         """
         CheckedLinalg.check(matrix)
-        return torch.linalg.inv(matrix)
+        return CheckedLinalg._propagate_nan(matrix, torch.linalg.inv(matrix))
 
     @staticmethod
     def inv_ex(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -123,7 +128,7 @@ class CheckedLinalg:
         """
         CheckedLinalg.check(matrix)
         inverse, info = torch.linalg.inv_ex(matrix)
-        return inverse, info
+        return CheckedLinalg._propagate_nan(matrix, inverse), info
 
     @staticmethod
     def lu_factor_ex(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -138,7 +143,38 @@ class CheckedLinalg:
         """
         CheckedLinalg.check(matrix)
         factors, pivots, info = torch.linalg.lu_factor_ex(matrix)
-        return factors, pivots, info
+        return CheckedLinalg._propagate_nan(matrix, factors), pivots, info
+
+    @staticmethod
+    def _propagate_nan(matrix: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+        """
+        ``value``, with :meth:`_nan_where_input_has_nan` applied off the CPU, where LAPACK propagates NaN itself.
+
+        :param matrix: The input matrices, of shape ``(..., m, m)``.
+        :param value: A result computed from ``matrix``, of shape ``(...,)`` followed by any trailing dimensions.
+        :return: ``value`` itself on CPU, and otherwise ``value`` with NaN for every matrix that has a NaN entry.
+        :rtype: torch.Tensor
+        """
+        if matrix.device.type == "cpu":
+            return value
+        return CheckedLinalg._nan_where_input_has_nan(matrix, value)  # pragma: no cover - needs a GPU
+
+    @staticmethod
+    def _nan_where_input_has_nan(matrix: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+        """
+        ``value`` with NaN in place of the results of the matrices of ``matrix`` that have a NaN entry, found with
+        one NaN-propagating ``amax`` over the real and imaginary parts.
+
+        :param matrix: The input matrices, of shape ``(..., m, m)``.
+        :param value: A result computed from ``matrix``, of shape ``(...,)`` followed by any trailing dimensions.
+        :return: ``value``, with every result of a matrix that has a NaN entry set to NaN.
+        :rtype: torch.Tensor
+        """
+        if matrix.shape[-1] == 0:
+            return value
+        entries = torch.view_as_real(matrix.resolve_conj()) if matrix.is_complex() else matrix[..., None]
+        has_nan = torch.isnan(entries.amax(dim=(-3, -2, -1)))  # (...,)
+        return value.masked_fill(has_nan.reshape(has_nan.shape + (1,) * (value.dim() - has_nan.dim())), torch.nan)
 
     @staticmethod
     @functools.lru_cache(maxsize=1024)

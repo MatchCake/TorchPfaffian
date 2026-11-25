@@ -50,9 +50,12 @@ class PfaffianParlettReid(PfaffianStrategy):
             return raw_pfaffian.reshape(matrix.shape[:-2])
         raw_pfaffian = (1 - 2 * (swaps % 2)) * raw_pfaffian  # each swap flips the sign
         # A pivot below EPSILON is declared an exact zero, as in the other linear-domain strategies; the steps
-        # after it divide by it, but each batch element is eliminated independently, so only it is affected.
+        # after it divide by it, but each batch element is eliminated independently, so only it is affected. The
+        # test is also False for the NaN pivots of a non-finite input, which therefore gives NaN instead of zero.
         valid = pivots.abs().amin(dim=1) >= PfaffianStrategy.EPSILON
         pfaffian = torch.where(valid, raw_pfaffian, torch.zeros_like(raw_pfaffian))
+        finite_input = torch.isfinite(matrix.reshape(-1, dimension, dimension)).flatten(-2).all(dim=-1)  # (batch,)
+        pfaffian = torch.where(finite_input, pfaffian, torch.full_like(pfaffian, torch.nan))
         return pfaffian.reshape(matrix.shape[:-2])
 
     @staticmethod
