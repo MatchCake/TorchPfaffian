@@ -235,7 +235,9 @@ def pfaffian(
     finite; with ``check_finite=True`` (default) such results are transparently recomputed in the log
     domain and recovered, so the caller gets the correct value without reaching for :func:`slog_pfaffian`.
     Only a magnitude that genuinely exceeds the input dtype's floating range remains non-finite, and only
-    then is a ``RuntimeWarning`` emitted. One extreme case is not auto-recovered: for ``m > AUTO_SMALL_MAX``
+    then is a ``RuntimeWarning`` emitted. A NaN entry gives a NaN Pfaffian on every route, and an input with a
+    NaN or inf entry is not recovered: its non-finite result comes with a ``RuntimeWarning`` naming the input as
+    the cause. One extreme case is not auto-recovered: for ``m > AUTO_SMALL_MAX``
     the linear signed path declares a pivot magnitude below ``PfaffianStrategy.EPSILON`` (``1e-30``) an
     exact zero, so a matrix whose Pfaffian hinges on such a sub-``1e-30`` pivot is reported as ``0``.
     :func:`slog_pfaffian`, which uses an exact-zero pivot test, computes these extreme inputs correctly
@@ -359,46 +361,57 @@ def _pfaffian(
         if matrix.dtype in LOW_PRECISION_DTYPES:
             # The unrolled kernel overflowed in half precision; the log-domain recovery needs an LU.
             return _pfaffian_upcast(matrix, sign, check_finite, epsilon, mask_roundoff_gradient, stacklevel + 1)
-        # The linear-domain fast paths can overflow to inf on wide-dynamic-range inputs whose true
-        # Pfaffian is finite. Transparently recover those elements in the log domain (Pf = phase *
-        # exp(log|Pf|) for the signed path, exp(log|Pf|) for the magnitude path), so the caller gets
-        # the correct value without reaching for slog_pfaffian. Only a magnitude that genuinely exceeds
-        # the dtype's float range stays non-finite, and only then is a warning emitted.
-        # The plain magnitude path recomputes the whole batch in the log domain: its reconstruction equals the
-        # linear result on the finite elements (to log/exp rounding), its gradient is exact, and the linear graph
-        # is discarded, avoiding the ``0 * inf = NaN`` its backward would form from the saved infinite result.
-        if sign:
-            # Recover only the non-finite elements with a finite input, so the others keep the exact gradient of
-            # the linear domain (the adjugate at singular elements). With a graph, the linear result is computed
-            # again with the identity in place of the recovered elements: its saved infinite Pfaffians would
-            # otherwise form 0 * inf = NaN in their backward. The recovered elements take SlogSignedPfaffian,
-            # whose backward is the full derivative: through slog_pfaffian it would miss the complex phase's.
-            needs_recovery = ~torch.isfinite(result) & torch.isfinite(matrix).flatten(-2).all(dim=-1)
-            identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
-            if matrix.requires_grad and torch.is_grad_enabled():
-                kept = torch.where(needs_recovery[..., None, None], identity, matrix)
-                result = _pfaffian(kept, sign, False, epsilon, mask_roundoff_gradient, stacklevel + 1)
-            recovered = SlogSignedPfaffian.apply(torch.where(needs_recovery[..., None, None], matrix, identity))
-            result = torch.where(needs_recovery, recovered, result)
-        elif mask_roundoff_gradient:
-            # Recover only the non-finite elements with a finite input, so the others keep the masked
-            # gradient. The log-domain branch sees the identity elsewhere: its backward still runs on the
-            # discarded elements, and 0 * NaN from a non-finite input would leak into their gradient.
-            needs_recovery = ~torch.isfinite(result) & torch.isfinite(matrix).flatten(-2).all(dim=-1)
-            identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
-            recovery_input = torch.where(needs_recovery[..., None, None], matrix, identity)
-            recovered = torch.exp(log_magnitude_pfaffian(recovery_input))
-            recovered = torch.clamp(recovered, min=(PfaffianStrategy.EPSILON if epsilon is None else epsilon) ** 0.5)
-            result = torch.where(needs_recovery, recovered, result)
-        else:
-            result = torch.exp(log_magnitude_pfaffian(matrix))
-            if epsilon is not None:
-                result = torch.clamp(result, min=epsilon**0.5)
-        if not torch.isfinite(result).all():
+        finite_input = torch.isfinite(matrix).flatten(-2).all(dim=-1)  # (...,)
+        if bool((~torch.isfinite(result) & finite_input).any()):
+            # The linear-domain fast paths can overflow to inf on wide-dynamic-range inputs whose true
+            # Pfaffian is finite. Transparently recover those elements in the log domain (Pf = phase *
+            # exp(log|Pf|) for the signed path, exp(log|Pf|) for the magnitude path), so the caller gets
+            # the correct value without reaching for slog_pfaffian. Only a magnitude that genuinely exceeds
+            # the dtype's float range stays non-finite, and only then is a warning emitted.
+            # The plain magnitude path recomputes the whole batch in the log domain: its reconstruction equals the
+            # linear result on the finite elements (to log/exp rounding), its gradient is exact, and the linear graph
+            # is discarded, avoiding the ``0 * inf = NaN`` its backward would form from the saved infinite result.
+            if sign:
+                # Recover only the non-finite elements with a finite input, so the others keep the exact gradient of
+                # the linear domain (the adjugate at singular elements). With a graph, the linear result is computed
+                # again with the identity in place of the recovered elements: its saved infinite Pfaffians would
+                # otherwise form 0 * inf = NaN in their backward. The recovered elements take SlogSignedPfaffian,
+                # whose backward is the full derivative: through slog_pfaffian it would miss the complex phase's.
+                needs_recovery = ~torch.isfinite(result) & finite_input
+                identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+                if matrix.requires_grad and torch.is_grad_enabled():
+                    kept = torch.where(needs_recovery[..., None, None], identity, matrix)
+                    result = _pfaffian(kept, sign, False, epsilon, mask_roundoff_gradient, stacklevel + 1)
+                recovered = SlogSignedPfaffian.apply(torch.where(needs_recovery[..., None, None], matrix, identity))
+                result = torch.where(needs_recovery, recovered, result)
+            elif mask_roundoff_gradient:
+                # Recover only the non-finite elements with a finite input, so the others keep the masked
+                # gradient. The log-domain branch sees the identity elsewhere: its backward still runs on the
+                # discarded elements, and 0 * NaN from a non-finite input would leak into their gradient.
+                needs_recovery = ~torch.isfinite(result) & finite_input
+                identity = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device).expand_as(matrix)
+                recovery_input = torch.where(needs_recovery[..., None, None], matrix, identity)
+                recovered = torch.exp(log_magnitude_pfaffian(recovery_input))
+                recovered = torch.clamp(
+                    recovered, min=(PfaffianStrategy.EPSILON if epsilon is None else epsilon) ** 0.5
+                )
+                result = torch.where(needs_recovery, recovered, result)
+            else:
+                result = torch.exp(log_magnitude_pfaffian(matrix))
+                if epsilon is not None:
+                    result = torch.clamp(result, min=epsilon**0.5)
+        non_finite = ~torch.isfinite(result)
+        if bool((non_finite & finite_input).any()):
             warnings.warn(
                 "Pfaffian is not finite after log-domain recovery: its true magnitude genuinely exceeds "
                 "the floating range of the input dtype at this matrix dimension. Use slog_pfaffian for the "
                 "log-magnitude, or a higher-precision dtype.",
+                RuntimeWarning,
+                stacklevel=stacklevel,
+            )
+        if bool((non_finite & ~finite_input).any()):
+            warnings.warn(
+                "Pfaffian is not finite because the input matrix has NaN or inf entries.",
                 RuntimeWarning,
                 stacklevel=stacklevel,
             )
