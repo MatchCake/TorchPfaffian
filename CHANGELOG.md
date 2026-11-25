@@ -30,6 +30,8 @@ changes the package's behaviour, API, documentation or packaging.
   against the input size in one overview (`--overview`).
 - Linux aarch64 (ARM) support: `uv.lock` resolves for `linux/aarch64` (`required-environments`), a
   manylinux aarch64 wheel is published, and the tests run on `ubuntu-24.04-arm` (#50).
+- CI: the tests also run on the lowest supported versions, Python 3.10, torch 2.1.0 (CPU) and numpy 1.23.0,
+  so code that needs a newer torch or numpy than `pyproject.toml` declares fails the pull request (#30).
 
 ### Changed
 

@@ -80,6 +80,55 @@ jobs:
           uv run python -m build --sdist --wheel --no-isolation --outdir dist/ .
           uv run twine check dist/*
 
+  Run-tests-on-lowest-versions:
+    # The other jobs test the locked, recent versions; this one keeps the declared floors of pyproject.toml
+    # (Python 3.10, torch 2.1, numpy 1.23) honest. Update the pins when a floor is raised.
+    name: Run tests on the lowest supported versions
+    runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: "3.10"
+      TORCH_VERSION: "2.1.0"
+      NUMPY_VERSION: "1.23.0"
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.2"
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - name: Install dependencies
+        run: |
+          uv venv .venv
+          uv sync --locked --dev --extra cpu
+      - name: Install the lowest torch and numpy
+        # Two installs: uv prefers --extra-index-url over --index-url, so a single one would take PyPI's CUDA torch.
+        run: |
+          uv pip install "torch==${TORCH_VERSION}+cpu" --index-url https://download.pytorch.org/whl/cpu
+          uv pip install "numpy==${NUMPY_VERSION}"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build native extension
+        run: uv run --no-sync maturin develop -m rust/Cargo.toml
+      - name: Check the installed versions
+        run: |
+          uv run --no-sync python -c "
+          import os, sys, numpy, torch
+          versions = (sys.version.split()[0], torch.__version__, numpy.__version__)
+          print('python %s, torch %s, numpy %s' % versions)
+          assert versions[0].startswith(os.environ['PYTHON_VERSION'] + '.')
+          assert torch.__version__ == os.environ['TORCH_VERSION'] + '+cpu'
+          assert numpy.__version__ == os.environ['NUMPY_VERSION']
+          "
+      - name: Test Unittests with pytest
+        # --no-sync keeps uv from restoring the locked torch and numpy.
+        run: uv run --no-sync pytest tests --session-timeout=600
+
   Run-tests-on-Windows:
     name: Run tests on Windows-latest
     needs: [ Run-tests-on-Ubuntu ]
