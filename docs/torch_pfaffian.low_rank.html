@@ -1,0 +1,1160 @@
+
+
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch_pfaffian.low_rank package &mdash; TorchPfaffian  documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/custom.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="static/css/theme.min.css" type="text/css" />
+  <link rel="stylesheet" href="static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="torch_pfaffian.strategies package" href="torch_pfaffian.strategies.html" />
+    <link rel="prev" title="torch_pfaffian.kernels package" href="torch_pfaffian.kernels.html" /> 
+
+</head>
+
+<body>
+    <header>
+        <div class="container">
+            <a class="site-nav-toggle hidden-lg-up"><i class="icon-menu"></i></a>
+            <a class="site-title" href="index.html">
+                TorchPfaffian
+            </a>
+        </div>
+    </header>
+
+
+<div class="breadcrumbs-outer hidden-xs-down">
+    <div class="container">
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="breadcrumbs">
+    
+      <li><a href="index.html">Docs</a></li>
+        
+          <li><a href="torch_pfaffian.html">torch_pfaffian package</a></li>
+        
+      <li>torch_pfaffian.low_rank package</li>
+    
+    
+      <li class="breadcrumbs-aside">
+        
+            
+            <a href="sources/torch_pfaffian.low_rank.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+</div>
+    </div>
+</div>
+    <div class="main-outer">
+        <div class="container">
+            <div class="row">
+                <div class="col-12 col-lg-3 site-nav">
+                    
+<div role="search">
+    <form class="search" action="search.html" method="get">
+        <div class="icon-input">
+            <input type="text" name="q" placeholder="Search" />
+            <span class="icon-search"></span>
+        </div>
+        <input type="submit" value="Go" class="d-hidden" />
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+                    <div class="site-nav-tree">
+                        
+                            
+                            
+                                <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="readme.html">TorchPfaffian: PyTorch-Based Pfaffian Computation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#description">Description</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#statement-of-need">Statement of need</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#usage">Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#important-links">Important Links</a></li>
+<li class="toctree-l1"><a class="reference internal" href="readme.html#found-a-bug-have-a-question-or-a-feature-request">Found a bug, have a question or a feature request?</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#license">License</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#citation">Citation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="readme.html#related-software">Related software</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/tutorial.html">The <code class="docutils literal notranslate"><span class="pre">pfaffian</span></code> function</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-a-single-skew-symmetric-matrix">Input: a single skew-symmetric matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-a-batch-of-matrices">Input: a batch of matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#input-dtype-real-or-complex">Input dtype: real or complex</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#output-signed-value-or-magnitude">Output: signed value or magnitude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#output-differentiable">Output: differentiable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/tutorial.html#summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/domino_tilings.html">Domino tilings and dimer probabilities</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#the-kasteleyn-matrix">The Kasteleyn matrix</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#counting-tilings">Counting tilings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#dimer-probabilities-from-the-gradient">Dimer probabilities from the gradient</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/domino_tilings.html#many-weightings-at-once">Many weightings at once</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#full-pfaffians">Full Pfaffians</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#pfaffian-ratios-under-low-rank-updates">Pfaffian ratios under low-rank updates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html#reading-the-results">Reading the results</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="limitations.html">Limitations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#input-assumptions">Input assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#supported-dtypes-and-half-precision">Supported dtypes and half precision</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#torch-func-transforms"><code class="docutils literal notranslate"><span class="pre">torch.func</span></code> transforms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#thread-count-and-mkl">Thread count and MKL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#derivatives-at-singular-matrices">Derivatives at singular matrices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#tiny-pivots">Tiny pivots</a></li>
+<li class="toctree-l2"><a class="reference internal" href="limitations.html#devices-and-platforms">Devices and platforms</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Modules:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="torch_pfaffian.html">torch_pfaffian package</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="torch_pfaffian.html#subpackages">Subpackages</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian.utils">torch_pfaffian.utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="torch_pfaffian.html#module-torch_pfaffian">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+                            
+                        
+                    </div>
+                </div>
+                <div class="col-12 col-lg-9">
+                    <div class="document">
+                        
+                            
+  <section id="torch-pfaffian-low-rank-package">
+<h1>torch_pfaffian.low_rank package<a class="headerlink" href="#torch-pfaffian-low-rank-package" title="Permalink to this heading">¶</a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this heading">¶</a></h2>
+</section>
+<section id="module-torch_pfaffian.low_rank.compiled_low_rank_pfaffian">
+<span id="torch-pfaffian-low-rank-compiled-low-rank-pfaffian-module"></span><h2>torch_pfaffian.low_rank.compiled_low_rank_pfaffian module<a class="headerlink" href="#module-torch_pfaffian.low_rank.compiled_low_rank_pfaffian" title="Permalink to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.compiled_low_rank_pfaffian.CompiledLowRankPfaffian">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">torch_pfaffian.low_rank.compiled_low_rank_pfaffian.</span></span><span class="sig-name descname"><span class="pre">CompiledLowRankPfaffian</span></span><a class="headerlink" href="#torch_pfaffian.low_rank.compiled_low_rank_pfaffian.CompiledLowRankPfaffian" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian"><code class="xref py py-class docutils literal notranslate"><span class="pre">LowRankPfaffian</span></code></a></p>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">LowRankPfaffian</span></code> whose tensor computations run through <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code>.</p>
+<p>Every method has the signature, results and gradients of <code class="xref py py-class docutils literal notranslate"><span class="pre">LowRankPfaffian</span></code>; the inputs are validated
+in eager Python as there, and only the tensor computation behind it (one core per method) is compiled, which
+fuses its small operators into a few kernels. That removes most of the per-operator overhead that dominates
+small inputs: on CPU, the inverse updates of a single <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">=</span> <span class="pre">32</span></code> matrix take about half the eager time, and
+on CUDA the per-call launches drop by about 2x. The ratios alone gain little on CPU, where the fixed cost of
+a compiled call (about 20 µs) is close to that of the eager operators.</p>
+<p>Each core is compiled on its first call (a few seconds) with <code class="docutils literal notranslate"><span class="pre">dynamic=None</span></code>: a second shape makes the
+sizes dynamic, so a matrix that grows step by step (<code class="xref py py-class docutils literal notranslate"><span class="pre">PfaffianChain</span></code>) is
+compiled twice, not once per size. Compilation needs what <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code> needs on the platform (a C++
+compiler on CPU, Triton on CUDA). A core whose compiled call fails while its eager computation succeeds (no
+compiler, or a <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code> bug of the installed PyTorch) runs eagerly from then on, with a
+<code class="docutils literal notranslate"><span class="pre">RuntimeWarning</span></code> the first time; an error that the eager computation raises too is raised as is. The
+compiled cores are shared by all callers in the process and are reset by <code class="docutils literal notranslate"><span class="pre">torch._dynamo.reset()</span></code>. Use it
+for long runs (Monte Carlo chains, many samples), where the compilation is amortized;
+<code class="xref py py-class docutils literal notranslate"><span class="pre">LowRankPfaffian</span></code> stays the default.</p>
+</dd></dl>
+
+</section>
+<section id="module-torch_pfaffian.low_rank.low_rank_pfaffian">
+<span id="torch-pfaffian-low-rank-low-rank-pfaffian-module"></span><h2>torch_pfaffian.low_rank.low_rank_pfaffian module<a class="headerlink" href="#module-torch_pfaffian.low_rank.low_rank_pfaffian" title="Permalink to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">torch_pfaffian.low_rank.low_rank_pfaffian.</span></span><span class="sig-name descname"><span class="pre">LowRankPfaffian</span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Ratios of Pfaffians and inverse updates under skew-symmetric low-rank updates.</p>
+<p>For a skew-symmetric invertible <code class="docutils literal notranslate"><span class="pre">A</span></code> and <code class="docutils literal notranslate"><span class="pre">u</span></code> of shape <code class="docutils literal notranslate"><span class="pre">(n,</span> <span class="pre">2k)</span></code>, the updated matrix is</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}A' = A - u J u^T, \qquad J = \begin{pmatrix} 0 &amp; I_k \\ -I_k &amp; 0 \end{pmatrix}\end{split}\]</div>
+<p>(the convention of lrux, arXiv:2602.05255), and with the <code class="docutils literal notranslate"><span class="pre">2k</span> <span class="pre">x</span> <span class="pre">2k</span></code> skew-symmetric matrix
+<code class="docutils literal notranslate"><span class="pre">R</span> <span class="pre">=</span> <span class="pre">J</span> <span class="pre">+</span> <span class="pre">u^T</span> <span class="pre">A^{-1}</span> <span class="pre">u</span></code>,</p>
+<div class="math notranslate nohighlight">
+\[\frac{\mathrm{Pf}(A')}{\mathrm{Pf}(A)} = \frac{\mathrm{Pf}(R)}{\mathrm{Pf}(J)}, \qquad
+A'^{-1} = A^{-1} + (A^{-1} u) R^{-1} (A^{-1} u)^T.\]</div>
+<p>The ratio costs <code class="docutils literal notranslate"><span class="pre">O(n^2</span> <span class="pre">k)</span></code> instead of the <code class="docutils literal notranslate"><span class="pre">O(n^3)</span></code> of a new Pfaffian, and so does the updated inverse
+(Woodbury identity), which is skew-symmetric up to round-off. A rank-2 update <code class="docutils literal notranslate"><span class="pre">u</span> <span class="pre">=</span> <span class="pre">(x,</span> <span class="pre">y)</span></code> adds
+<code class="docutils literal notranslate"><span class="pre">y</span> <span class="pre">x^T</span> <span class="pre">-</span> <span class="pre">x</span> <span class="pre">y^T</span></code> to <code class="docutils literal notranslate"><span class="pre">A</span></code>; replacing one row and column (<a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio_replace()</span></code></a>) costs <code class="docutils literal notranslate"><span class="pre">O(n)</span></code> for the
+ratio.</p>
+<p>Only tensor operations are used, so every method is batched, runs on any device without host
+synchronization, and is differentiable. Complex inputs use the transpose, not the conjugate transpose, as
+the Pfaffian is bilinear. <code class="docutils literal notranslate"><span class="pre">float16</span></code>, <code class="docutils literal notranslate"><span class="pre">bfloat16</span></code> and <code class="docutils literal notranslate"><span class="pre">complex32</span></code> inputs are computed in <code class="docutils literal notranslate"><span class="pre">float32</span></code> or
+<code class="docutils literal notranslate"><span class="pre">complex64</span></code> with a <code class="docutils literal notranslate"><span class="pre">UserWarning</span></code>, as in <a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.pfaffian" title="torch_pfaffian.pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">pfaffian()</span></code></a>. When a ratio is zero, the
+updated matrix and <code class="docutils literal notranslate"><span class="pre">R</span></code> are singular: the returned inverse is then meaningless (huge or non-finite) and
+should be recomputed from the updated matrix when it is needed.</p>
+<p>Gradients are exact for any skew-symmetric construction of the inputs (e.g. from circuit parameters). The
+gradient with respect to a raw <code class="docutils literal notranslate"><span class="pre">inverse</span></code> leaf is projected onto skew-symmetric matrices
+(<code class="xref py py-class docutils literal notranslate"><span class="pre">SkewGradient</span></code>), the convention of <a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.pfaffian" title="torch_pfaffian.pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">pfaffian()</span></code></a>. The
+gradients with respect to <code class="docutils literal notranslate"><span class="pre">update</span></code>, <code class="docutils literal notranslate"><span class="pre">change</span></code>, <code class="docutils literal notranslate"><span class="pre">border</span></code> and <code class="docutils literal notranslate"><span class="pre">corner</span></code> sit on the entries that are
+read: when they are slices of a larger skew-symmetric leaf matrix, only the skew-symmetric part of that
+matrix’s gradient is meaningful.</p>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">PfaffianUpdater</span></code> chains such updates, with delayed inverse updates.</p>
+<p>On CPU, without a graph to build (<code class="docutils literal notranslate"><span class="pre">torch.no_grad()</span></code>, or inputs that do not require grad), <code class="docutils literal notranslate"><span class="pre">ratio</span></code>,
+<code class="docutils literal notranslate"><span class="pre">ratio_and_inverse</span></code>, <code class="docutils literal notranslate"><span class="pre">ratio_replace</span></code> and <code class="docutils literal notranslate"><span class="pre">ratio_replace_and_inverse</span></code> run in one call of the compiled
+Rust extension instead of a handful of PyTorch operators, which dominate small inputs (a rank-2 ratio and
+inverse of one <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">=</span> <span class="pre">32</span></code> matrix: 17 us instead of 77 us). Updates wider than rank 2 on large batches keep
+the PyTorch path, whose matrix products are faster there.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.NATIVE_WIDE_MAX_NUMEL">
+<span class="sig-name descname"><span class="pre">NATIVE_WIDE_MAX_NUMEL</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">65536</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.NATIVE_WIDE_MAX_NUMEL" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.add_product">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">add_product</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">left</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">right</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.add_product" title="Permalink to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">matrix</span> <span class="pre">+</span> <span class="pre">left</span> <span class="pre">&#64;</span> <span class="pre">right</span></code> in one fused pass over <code class="docutils literal notranslate"><span class="pre">matrix</span></code> when the batch shapes allow it.</p>
+<p>The low-rank corrections of the inverse are skew-symmetric by construction, so the result stays
+skew-symmetric up to round-off without an explicit (and, at large <code class="docutils literal notranslate"><span class="pre">n</span></code>, costly) symmetrization.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>matrix</strong> – Matrix of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>left</strong> – Left factor, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">p)</span></code>.</p></li>
+<li><p><strong>right</strong> – Right factor, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">p,</span> <span class="pre">n)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">matrix</span> <span class="pre">+</span> <span class="pre">left</span> <span class="pre">&#64;</span> <span class="pre">right</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.as_index">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">as_index</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">device</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.as_index" title="Permalink to this definition">¶</a></dt>
+<dd><p>Row index of <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio_replace()</span></code></a> as an <code class="docutils literal notranslate"><span class="pre">int64</span></code> tensor on <code class="docutils literal notranslate"><span class="pre">device</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>index</strong> – An integer or an integer tensor.</p></li>
+<li><p><strong>device</strong> – Device of the matrices.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The index tensor.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>TypeError</strong> – If <code class="docutils literal notranslate"><span class="pre">index</span></code> is not an integer.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.project">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">project</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vectors</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.project" title="Permalink to this definition">¶</a></dt>
+<dd><p>Product <code class="docutils literal notranslate"><span class="pre">A^{-1}</span> <span class="pre">v</span></code> with a skew-symmetric <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code>, computed as <code class="docutils literal notranslate"><span class="pre">-(v^T</span> <span class="pre">A^{-1})^T</span></code>.</p>
+<p>The transposed product reads <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> row by row and is about 3x faster on CPU for the skinny <code class="docutils literal notranslate"><span class="pre">v</span></code> of
+low-rank updates; the two agree up to the round-off in the skew-symmetry of <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Skew-symmetric matrix <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>vectors</strong> – Vectors <code class="docutils literal notranslate"><span class="pre">v</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">p)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">A^{-1}</span> <span class="pre">v</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">p)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ratio</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">update</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio <code class="docutils literal notranslate"><span class="pre">Pf(A</span> <span class="pre">-</span> <span class="pre">u</span> <span class="pre">J</span> <span class="pre">u^T)</span> <span class="pre">/</span> <span class="pre">Pf(A)</span></code> from the inverse <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Inverse <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> of the original skew-symmetric matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>update</strong> – Update vectors <code class="docutils literal notranslate"><span class="pre">u</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">2k)</span></code>; the batch dimensions broadcast with those
+of <code class="docutils literal notranslate"><span class="pre">inverse</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match or <code class="docutils literal notranslate"><span class="pre">update</span></code> has an odd or zero number of columns.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices of the inputs differ, or the dtype is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_and_inverse">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ratio_and_inverse</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">update</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_and_inverse" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio <code class="docutils literal notranslate"><span class="pre">Pf(A</span> <span class="pre">-</span> <span class="pre">u</span> <span class="pre">J</span> <span class="pre">u^T)</span> <span class="pre">/</span> <span class="pre">Pf(A)</span></code> of <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio()</span></code></a> and the inverse <code class="docutils literal notranslate"><span class="pre">(A</span> <span class="pre">-</span> <span class="pre">u</span> <span class="pre">J</span> <span class="pre">u^T)^{-1}</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Inverse <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> of the original skew-symmetric matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>update</strong> – Update vectors <code class="docutils literal notranslate"><span class="pre">u</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">2k)</span></code>; the batch dimensions broadcast with those
+of <code class="docutils literal notranslate"><span class="pre">inverse</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, and the updated inverse, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple[torch.Tensor, torch.Tensor]</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match or <code class="docutils literal notranslate"><span class="pre">update</span></code> has an odd or zero number of columns.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices of the inputs differ, or the dtype is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_and_r_inverse">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ratio_and_r_inverse</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">update</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">projected</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_and_r_inverse" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio of <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio()</span></code></a> and the inverse of its matrix <code class="docutils literal notranslate"><span class="pre">R</span></code>, from the projection <code class="docutils literal notranslate"><span class="pre">A^{-1}</span> <span class="pre">u</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>update</strong> – Update vectors <code class="docutils literal notranslate"><span class="pre">u</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">2k)</span></code>.</p></li>
+<li><p><strong>projected</strong> – Projection <code class="docutils literal notranslate"><span class="pre">A^{-1}</span> <span class="pre">u</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">2k)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, and <code class="docutils literal notranslate"><span class="pre">R^{-1}</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">2k,</span> <span class="pre">2k)</span></code> (huge or non-finite
+when the ratio is zero).</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple[torch.Tensor, torch.Tensor]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_extend">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ratio_extend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">border</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">corner</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_extend" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio of Pfaffians when a skew-symmetric matrix grows by <code class="docutils literal notranslate"><span class="pre">2k</span></code> rows and columns.</p>
+<p>For the bordered matrix</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}M = \begin{pmatrix} A &amp; B \\ -B^T &amp; C \end{pmatrix}, \qquad
+\frac{\mathrm{Pf}(M)}{\mathrm{Pf}(A)} = \mathrm{Pf}\left(C + B^T A^{-1} B\right),\end{split}\]</div>
+<p>the Pfaffian of the <code class="docutils literal notranslate"><span class="pre">2k</span> <span class="pre">x</span> <span class="pre">2k</span></code> Schur complement, in <code class="docutils literal notranslate"><span class="pre">O(m^2</span> <span class="pre">k)</span></code> from <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code>. This is the step of
+sequential (qubit-by-qubit) sampling of matchgate circuits, where a qubit adds the <code class="docutils literal notranslate"><span class="pre">2</span> <span class="pre">x</span> <span class="pre">2</span></code> block of its
+two Majorana modes: the conditional probability of an outcome is <code class="docutils literal notranslate"><span class="pre">|ratio|</span> <span class="pre">/</span> <span class="pre">2</span></code>. <code class="docutils literal notranslate"><span class="pre">A</span></code> may be empty
+(<code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">0</span></code>), when the ratio is <code class="docutils literal notranslate"><span class="pre">Pf(C)</span></code>.</p>
+<p>Only <code class="docutils literal notranslate"><span class="pre">C</span></code> depends on the outcome, so several candidate corners are evaluated at the cost of one: give
+them a leading dimension, e.g. <code class="docutils literal notranslate"><span class="pre">corner</span></code> of shape <code class="docutils literal notranslate"><span class="pre">(2,</span> <span class="pre">...,</span> <span class="pre">2k,</span> <span class="pre">2k)</span></code> for the outcomes 0 and 1, and the
+ratios have shape <code class="docutils literal notranslate"><span class="pre">(2,</span> <span class="pre">...)</span></code> (<code class="docutils literal notranslate"><span class="pre">A^{-1}</span> <span class="pre">B</span></code> is computed once, at the batch shape of <code class="docutils literal notranslate"><span class="pre">inverse</span></code> and
+<code class="docutils literal notranslate"><span class="pre">border</span></code>). <code class="xref py py-class docutils literal notranslate"><span class="pre">PfaffianChain</span></code> keeps <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> from one step to the next.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Inverse <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> of the current skew-symmetric matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">m)</span></code>.</p></li>
+<li><p><strong>border</strong> – Coupling <code class="docutils literal notranslate"><span class="pre">B</span></code> of the current rows to the new ones, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">2k)</span></code>.</p></li>
+<li><p><strong>corner</strong> – Skew-symmetric block <code class="docutils literal notranslate"><span class="pre">C</span></code> of the new rows and columns, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">2k,</span> <span class="pre">2k)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio <code class="docutils literal notranslate"><span class="pre">Pf(M)</span> <span class="pre">/</span> <span class="pre">Pf(A)</span></code>, of the broadcast batch shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices of the inputs differ, or the dtype is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_extend_and_inverse">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ratio_extend_and_inverse</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">border</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">corner</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_extend_and_inverse" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio of <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_extend" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_extend"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio_extend()</span></code></a> and the inverse of the bordered matrix, in <code class="docutils literal notranslate"><span class="pre">O(m^2</span> <span class="pre">k)</span></code>.</p>
+<p>With <code class="docutils literal notranslate"><span class="pre">P</span> <span class="pre">=</span> <span class="pre">A^{-1}</span> <span class="pre">B</span></code> and the Schur complement <code class="docutils literal notranslate"><span class="pre">S</span> <span class="pre">=</span> <span class="pre">C</span> <span class="pre">+</span> <span class="pre">B^T</span> <span class="pre">A^{-1}</span> <span class="pre">B</span></code>,</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}M^{-1} = \begin{pmatrix} A^{-1} + P S^{-1} P^T &amp; -P S^{-1} \\ -S^{-1} P^T &amp; S^{-1} \end{pmatrix}.\end{split}\]</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Inverse <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> of the current skew-symmetric matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">m)</span></code>.</p></li>
+<li><p><strong>border</strong> – Coupling <code class="docutils literal notranslate"><span class="pre">B</span></code> of the current rows to the new ones, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">2k)</span></code>.</p></li>
+<li><p><strong>corner</strong> – Skew-symmetric block <code class="docutils literal notranslate"><span class="pre">C</span></code> of the new rows and columns, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">2k,</span> <span class="pre">2k)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of the broadcast batch shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, and <code class="docutils literal notranslate"><span class="pre">M^{-1}</span></code>, of shape
+<code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m</span> <span class="pre">+</span> <span class="pre">2k,</span> <span class="pre">m</span> <span class="pre">+</span> <span class="pre">2k)</span></code> (huge or non-finite when the ratio is zero).</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple[torch.Tensor, torch.Tensor]</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices of the inputs differ, or the dtype is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ratio_replace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">change</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio of Pfaffians when one row and the matching column of a skew-symmetric matrix change.</p>
+<p>Row <code class="docutils literal notranslate"><span class="pre">i</span></code> of <code class="docutils literal notranslate"><span class="pre">A</span></code> becomes <code class="docutils literal notranslate"><span class="pre">A[i]</span> <span class="pre">+</span> <span class="pre">c</span></code> and column <code class="docutils literal notranslate"><span class="pre">i</span></code> becomes <code class="docutils literal notranslate"><span class="pre">A[:,</span> <span class="pre">i]</span> <span class="pre">-</span> <span class="pre">c</span></code>, so that <code class="docutils literal notranslate"><span class="pre">A'</span></code> stays
+skew-symmetric; <code class="docutils literal notranslate"><span class="pre">c_i</span></code> has no effect (the diagonal stays zero, and it only meets the zero diagonal of
+<code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code>, up to round-off). This is the rank-2 update <code class="docutils literal notranslate"><span class="pre">u</span> <span class="pre">=</span> <span class="pre">(c,</span> <span class="pre">e_i)</span></code>
+of <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio()</span></code></a>, with a one-hot <code class="docutils literal notranslate"><span class="pre">e_i</span></code>, for which</p>
+<div class="math notranslate nohighlight">
+\[r = \frac{\mathrm{Pf}(A')}{\mathrm{Pf}(A)} = 1 + c^T A^{-1} e_i.\]</div>
+<p>It reads one column of the inverse and costs <code class="docutils literal notranslate"><span class="pre">O(n)</span></code>. To replace row <code class="docutils literal notranslate"><span class="pre">i</span></code> by a new row <code class="docutils literal notranslate"><span class="pre">x</span></code> (with
+<code class="docutils literal notranslate"><span class="pre">x_i</span> <span class="pre">=</span> <span class="pre">0</span></code>), pass <code class="docutils literal notranslate"><span class="pre">change</span> <span class="pre">=</span> <span class="pre">x</span> <span class="pre">-</span> <span class="pre">A[i]</span></code>. <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace_and_inverse" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace_and_inverse"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio_replace_and_inverse()</span></code></a> also updates the inverse.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Inverse <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> of the original skew-symmetric matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>index</strong> – Index <code class="docutils literal notranslate"><span class="pre">i</span></code> of the row and column that change, an integer or an integer tensor of shape
+<code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p></li>
+<li><p><strong>change</strong> – Change <code class="docutils literal notranslate"><span class="pre">c</span></code> of row <code class="docutils literal notranslate"><span class="pre">i</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, whose shape is the broadcast of the batch shapes of <code class="docutils literal notranslate"><span class="pre">inverse</span></code>, <code class="docutils literal notranslate"><span class="pre">index</span></code> and
+<code class="docutils literal notranslate"><span class="pre">change</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices of the inputs differ, <code class="docutils literal notranslate"><span class="pre">index</span></code> is not an integer tensor, or
+the dtype is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace_and_inverse">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ratio_replace_and_inverse</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">change</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace_and_inverse" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio of <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.ratio_replace"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio_replace()</span></code></a> and the inverse of the updated matrix, in <code class="docutils literal notranslate"><span class="pre">O(n^2)</span></code>:</p>
+<div class="math notranslate nohighlight">
+\[A'^{-1} = A^{-1} + \frac{(A^{-1} e_i)(A^{-1} c)^T - (A^{-1} c)(A^{-1} e_i)^T}{r}.\]</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Inverse <code class="docutils literal notranslate"><span class="pre">A^{-1}</span></code> of the original skew-symmetric matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>index</strong> – Index <code class="docutils literal notranslate"><span class="pre">i</span></code> of the row and column that change, an integer or an integer tensor of shape
+<code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p></li>
+<li><p><strong>change</strong> – Change <code class="docutils literal notranslate"><span class="pre">c</span></code> of row <code class="docutils literal notranslate"><span class="pre">i</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of the broadcast batch shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, and the updated inverse, of shape
+<code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple[torch.Tensor, torch.Tensor]</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices of the inputs differ, <code class="docutils literal notranslate"><span class="pre">index</span></code> is not an integer tensor, or
+the dtype is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">skew_identity</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rank</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dtype</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">device</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity" title="Permalink to this definition">¶</a></dt>
+<dd><p>Skew-symmetric identity <code class="docutils literal notranslate"><span class="pre">J</span> <span class="pre">=</span> <span class="pre">[[0,</span> <span class="pre">I_k],</span> <span class="pre">[-I_k,</span> <span class="pre">0]]</span></code> of the low-rank Pfaffian updates.</p>
+<p>Its Pfaffian is <code class="docutils literal notranslate"><span class="pre">(-1)^(k</span> <span class="pre">(k</span> <span class="pre">-</span> <span class="pre">1)</span> <span class="pre">/</span> <span class="pre">2)</span></code> (see <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity_pfaffian" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity_pfaffian"><code class="xref py py-meth docutils literal notranslate"><span class="pre">skew_identity_pfaffian()</span></code></a>) and its inverse is <code class="docutils literal notranslate"><span class="pre">-J</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>rank</strong> – Half the size <code class="docutils literal notranslate"><span class="pre">k</span></code> of the matrix, at least 1.</p></li>
+<li><p><strong>dtype</strong> – Dtype of the result (PyTorch’s default dtype when <code class="docutils literal notranslate"><span class="pre">None</span></code>).</p></li>
+<li><p><strong>device</strong> – Device of the result (the default device when <code class="docutils literal notranslate"><span class="pre">None</span></code>).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The matrix <code class="docutils literal notranslate"><span class="pre">J</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(2k,</span> <span class="pre">2k)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">rank</span></code> is smaller than 1.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity_pfaffian">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">skew_identity_pfaffian</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rank</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity_pfaffian" title="Permalink to this definition">¶</a></dt>
+<dd><p>Pfaffian of <a class="reference internal" href="#torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity" title="torch_pfaffian.low_rank.low_rank_pfaffian.LowRankPfaffian.skew_identity"><code class="xref py py-meth docutils literal notranslate"><span class="pre">skew_identity()</span></code></a>, <code class="docutils literal notranslate"><span class="pre">(-1)^(k</span> <span class="pre">(k</span> <span class="pre">-</span> <span class="pre">1)</span> <span class="pre">/</span> <span class="pre">2)</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>rank</strong> – Half the size <code class="docutils literal notranslate"><span class="pre">k</span></code> of the matrix.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">1</span></code> or <code class="docutils literal notranslate"><span class="pre">-1</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-torch_pfaffian.low_rank.pfaffian_chain">
+<span id="torch-pfaffian-low-rank-pfaffian-chain-module"></span><h2>torch_pfaffian.low_rank.pfaffian_chain module<a class="headerlink" href="#module-torch_pfaffian.low_rank.pfaffian_chain" title="Permalink to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">torch_pfaffian.low_rank.pfaffian_chain.</span></span><span class="sig-name descname"><span class="pre">PfaffianChain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch_shape</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Size</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dtype</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">torch.float64</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">device</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compiled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Pfaffian of a skew-symmetric matrix that grows block by block, with the ratio of each growth step.</p>
+<p>The state is the inverse of the current <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">x</span> <span class="pre">m</span></code> matrix <code class="docutils literal notranslate"><span class="pre">A</span></code> and its Pfaffian. A step appends <code class="docutils literal notranslate"><span class="pre">2k</span></code> rows
+and columns, the coupling <code class="docutils literal notranslate"><span class="pre">B</span></code> (<code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">x</span> <span class="pre">2k</span></code>) and the block <code class="docutils literal notranslate"><span class="pre">C</span></code> (<code class="docutils literal notranslate"><span class="pre">2k</span> <span class="pre">x</span> <span class="pre">2k</span></code>):</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}\begin{pmatrix} A &amp; B \\ -B^T &amp; C \end{pmatrix}, \qquad
+\text{ratio} = \mathrm{Pf}\left(C + B^T A^{-1} B\right),\end{split}\]</div>
+<p>in <code class="docutils literal notranslate"><span class="pre">O(m^2</span> <span class="pre">k)</span></code> (see <code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio_extend()</span></code>), so the Pfaffians of
+all the leading blocks of an <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">x</span> <span class="pre">n</span></code> matrix cost <code class="docutils literal notranslate"><span class="pre">O(n^3)</span></code> in total, against <code class="docutils literal notranslate"><span class="pre">O(n^4)</span></code> when each is
+computed anew.</p>
+<p>This is the loop of qubit-by-qubit sampling of a matchgate circuit (as in MatchCake). The probability of
+the outcomes <code class="docutils literal notranslate"><span class="pre">y_0</span> <span class="pre">...</span> <span class="pre">y_j</span></code> is <code class="docutils literal notranslate"><span class="pre">2^{-(j+1)}</span> <span class="pre">|Pf(M_j)|</span></code>, with <code class="docutils literal notranslate"><span class="pre">M_j</span></code> the principal submatrix of
+<code class="docutils literal notranslate"><span class="pre">Lambda</span> <span class="pre">+</span> <span class="pre">Lambda_y</span></code> on the Majorana modes of qubits <code class="docutils literal notranslate"><span class="pre">0</span> <span class="pre">...</span> <span class="pre">j</span></code>. Qubit <code class="docutils literal notranslate"><span class="pre">j</span></code> appends its two modes: <code class="docutils literal notranslate"><span class="pre">B</span></code>
+is the covariance between the modes of the qubits sampled so far and its own, and <code class="docutils literal notranslate"><span class="pre">C</span></code> its <code class="docutils literal notranslate"><span class="pre">2</span> <span class="pre">x</span> <span class="pre">2</span></code>
+block, which depends on the outcome <code class="docutils literal notranslate"><span class="pre">y_j</span></code>. <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.ratios" title="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.ratios"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ratios()</span></code></a> gives the ratio for every candidate block (the
+conditional probabilities are <code class="docutils literal notranslate"><span class="pre">|ratio|</span> <span class="pre">/</span> <span class="pre">2</span></code>), and <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.extend" title="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.extend"><code class="xref py py-meth docutils literal notranslate"><span class="pre">extend()</span></code></a> appends the sampled one:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">chain</span> <span class="o">=</span> <span class="n">PfaffianChain</span><span class="p">((</span><span class="n">shots</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">covariance</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">qubit</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_qubits</span><span class="p">):</span>
+    <span class="n">modes</span> <span class="o">=</span> <span class="nb">slice</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">qubit</span><span class="p">,</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">qubit</span> <span class="o">+</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">border</span> <span class="o">=</span> <span class="n">covariance</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="p">:</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">qubit</span><span class="p">,</span> <span class="n">modes</span><span class="p">]</span>                   <span class="c1"># (shots, 2 qubit, 2)</span>
+    <span class="n">corners</span> <span class="o">=</span> <span class="n">covariance</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">modes</span><span class="p">,</span> <span class="n">modes</span><span class="p">]</span> <span class="o">+</span> <span class="n">outcome_blocks</span>       <span class="c1"># (shots, 2, 2, 2), y = 0 and 1</span>
+    <span class="n">probabilities</span> <span class="o">=</span> <span class="n">chain</span><span class="o">.</span><span class="n">ratios</span><span class="p">(</span><span class="n">border</span><span class="p">,</span> <span class="n">corners</span><span class="p">)</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span> <span class="o">/</span> <span class="mi">2</span>        <span class="c1"># (shots, 2)</span>
+    <span class="n">outcome</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">multinomial</span><span class="p">(</span><span class="n">probabilities</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>          <span class="c1"># (shots,)</span>
+    <span class="n">chain</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">border</span><span class="p">,</span> <span class="n">corners</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">shots</span><span class="p">),</span> <span class="n">outcome</span><span class="p">])</span>
+</pre></div>
+</div>
+<p>Every operation is a batched tensor operation on any device, without host synchronization, and is
+differentiable: gradients are exact for any skew-symmetric construction of the matrix (e.g. <code class="docutils literal notranslate"><span class="pre">Lambda(t)</span></code> from
+circuit parameters). The chain reads the blocks <code class="docutils literal notranslate"><span class="pre">B</span></code> and <code class="docutils literal notranslate"><span class="pre">C</span></code> and never <code class="docutils literal notranslate"><span class="pre">-B^T</span></code>, so when they are slices of a
+skew-symmetric leaf matrix, its gradient sits on those blocks and only its skew-symmetric part, <code class="docutils literal notranslate"><span class="pre">g</span> <span class="pre">-</span> <span class="pre">g^T</span></code>,
+matches that of <a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.pfaffian" title="torch_pfaffian.pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">pfaffian()</span></code></a>. A zero ratio (an outcome of probability zero) makes the grown
+matrix singular: such a block must not be appended.</p>
+<p>The batch dimensions of the borders and corners broadcast with <code class="docutils literal notranslate"><span class="pre">batch_shape</span></code>. The dtype is float32,
+float64, complex64 or complex128.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch_shape</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Size</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dtype</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">torch.float64</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">device</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compiled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.__init__" title="Permalink to this definition">¶</a></dt>
+<dd><p>Start from the empty matrix (<code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">0</span></code>, Pfaffian 1).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>batch_shape</strong> – Batch shape of the chain, e.g. <code class="docutils literal notranslate"><span class="pre">(shots,)</span></code>; the first step may broadcast it.</p></li>
+<li><p><strong>dtype</strong> – Dtype of the matrices: float32, float64, complex64 or complex128.</p></li>
+<li><p><strong>device</strong> – Device of the matrices.</p></li>
+<li><p><strong>compiled</strong> – When <code class="docutils literal notranslate"><span class="pre">True</span></code>, run the steps through <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code>
+(<code class="xref py py-class docutils literal notranslate"><span class="pre">CompiledLowRankPfaffian</span></code>): a few seconds of compilation on the first
+steps (the growing size is compiled once, as a dynamic shape), then less per-call overhead.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>TypeError</strong> – If <code class="docutils literal notranslate"><span class="pre">dtype</span></code> is not supported.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.dimension">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">dimension</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.dimension" title="Permalink to this definition">¶</a></dt>
+<dd><p>Size <code class="docutils literal notranslate"><span class="pre">m</span></code> of the current matrix.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The number of rows of the current matrix.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.extend">
+<span class="sig-name descname"><span class="pre">extend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">border</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">corner</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.extend" title="Permalink to this definition">¶</a></dt>
+<dd><p>Append the rows and columns <code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">C)</span></code> to the current matrix.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>border</strong> – Coupling <code class="docutils literal notranslate"><span class="pre">B</span></code> of the current rows to the new ones, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">2k)</span></code>.</p></li>
+<li><p><strong>corner</strong> – Block <code class="docutils literal notranslate"><span class="pre">C</span></code> of the new rows and columns, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">2k,</span> <span class="pre">2k)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio of the step, <code class="docutils literal notranslate"><span class="pre">Pf(M')</span> <span class="pre">/</span> <span class="pre">Pf(M)</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices differ from those of the chain.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.from_matrix">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_matrix</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compiled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain" title="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain"><span class="pre">PfaffianChain</span></a></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.from_matrix" title="Permalink to this definition">¶</a></dt>
+<dd><p>Start from a non-empty skew-symmetric matrix, computing its inverse and Pfaffian.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>matrix</strong> – Invertible skew-symmetric matrix of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">m)</span></code>, in float32, float64, complex64
+or complex128.</p></li>
+<li><p><strong>compiled</strong> – When <code class="docutils literal notranslate"><span class="pre">True</span></code>, run the steps through <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The chain, whose current matrix is <code class="docutils literal notranslate"><span class="pre">matrix</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain" title="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain">PfaffianChain</a></p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">matrix</span></code> is not square.</p></li>
+<li><p><strong>TypeError</strong> – If the dtype of <code class="docutils literal notranslate"><span class="pre">matrix</span></code> is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.inverse">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">inverse</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.inverse" title="Permalink to this definition">¶</a></dt>
+<dd><p>Inverse of the current matrix.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The inverse, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">m)</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.pfaffian">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">pfaffian</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.pfaffian" title="Permalink to this definition">¶</a></dt>
+<dd><p>Pfaffian of the current matrix, the product of the ratios of the steps (times that of the initial matrix
+for <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.from_matrix" title="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.from_matrix"><code class="xref py py-meth docutils literal notranslate"><span class="pre">from_matrix()</span></code></a>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The Pfaffian, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.ratio">
+<span class="sig-name descname"><span class="pre">ratio</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">border</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">corner</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.ratio" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio <code class="docutils literal notranslate"><span class="pre">Pf(M')</span> <span class="pre">/</span> <span class="pre">Pf(M)</span></code> for one block, without changing the state.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>border</strong> – Coupling <code class="docutils literal notranslate"><span class="pre">B</span></code> of the current rows to the new ones, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">2k)</span></code>.</p></li>
+<li><p><strong>corner</strong> – Block <code class="docutils literal notranslate"><span class="pre">C</span></code> of the new rows and columns, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">2k,</span> <span class="pre">2k)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices differ from those of the chain.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.ratios">
+<span class="sig-name descname"><span class="pre">ratios</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">border</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">corners</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_chain.PfaffianChain.ratios" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratios <code class="docutils literal notranslate"><span class="pre">Pf(M')</span> <span class="pre">/</span> <span class="pre">Pf(M)</span></code> for several candidate blocks, without changing the state.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>border</strong> – Coupling <code class="docutils literal notranslate"><span class="pre">B</span></code> of the current rows to the new ones, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">m,</span> <span class="pre">2k)</span></code>.</p></li>
+<li><p><strong>corners</strong> – Candidate blocks <code class="docutils literal notranslate"><span class="pre">C</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">c,</span> <span class="pre">2k,</span> <span class="pre">2k)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio for every candidate, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">c)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If the shapes do not match.</p></li>
+<li><p><strong>TypeError</strong> – If the dtypes or devices differ from those of the chain.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-torch_pfaffian.low_rank.pfaffian_updater">
+<span id="torch-pfaffian-low-rank-pfaffian-updater-module"></span><h2>torch_pfaffian.low_rank.pfaffian_updater module<a class="headerlink" href="#module-torch_pfaffian.low_rank.pfaffian_updater" title="Permalink to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">torch_pfaffian.low_rank.pfaffian_updater.</span></span><span class="sig-name descname"><span class="pre">PfaffianUpdater</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_delay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compiled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Successive low-rank updates of a skew-symmetric matrix, with Pfaffian ratios and delayed inverse updates.</p>
+<p>The state is the inverse <code class="docutils literal notranslate"><span class="pre">A_0^{-1}</span></code> of the last merged matrix and, for each of the <code class="docutils literal notranslate"><span class="pre">tau</span></code> updates
+accepted since, the projection <code class="docutils literal notranslate"><span class="pre">a_t</span> <span class="pre">=</span> <span class="pre">A_{t-1}^{-1}</span> <span class="pre">u_t</span></code> and <code class="docutils literal notranslate"><span class="pre">R_t^{-1}</span></code> (see
+<code class="xref py py-class docutils literal notranslate"><span class="pre">LowRankPfaffian</span></code> for the convention <code class="docutils literal notranslate"><span class="pre">A_t</span> <span class="pre">=</span> <span class="pre">A_{t-1}</span> <span class="pre">-</span> <span class="pre">u_t</span> <span class="pre">J</span> <span class="pre">u_t^T</span></code>). The
+current inverse is never formed between merges:</p>
+<div class="math notranslate nohighlight">
+\[A_\tau^{-1} u = A_0^{-1} u + \sum_{t=1}^{\tau} a_t R_t^{-1} (a_t^T u) = A_0^{-1} u + P D (P^T u),\]</div>
+<p>with the projections side by side, <code class="docutils literal notranslate"><span class="pre">P</span> <span class="pre">=</span> <span class="pre">(a_1,</span> <span class="pre">...,</span> <span class="pre">a_tau)</span></code>, and the block-diagonal <code class="docutils literal notranslate"><span class="pre">D</span></code> of the
+<code class="docutils literal notranslate"><span class="pre">R_t^{-1}</span></code>, so an update costs <code class="docutils literal notranslate"><span class="pre">O(n^2</span> <span class="pre">k</span> <span class="pre">+</span> <span class="pre">\tau</span> <span class="pre">n</span> <span class="pre">k^2)</span></code> and does not rewrite the <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">x</span> <span class="pre">n</span></code> inverse. After
+<code class="docutils literal notranslate"><span class="pre">max_delay</span></code> accepted updates the corrections are merged into the inverse. lrux (arXiv:2602.05255)
+suggests <code class="docutils literal notranslate"><span class="pre">max_delay</span></code> of about <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">/</span> <span class="pre">(20</span> <span class="pre">k)</span></code>.</p>
+<p>Every operation is a tensor operation on the batch, without host synchronization, so a batch of Monte
+Carlo walkers is updated at once: <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.accept" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.accept"><code class="xref py py-meth docutils literal notranslate"><span class="pre">accept()</span></code></a> takes a mask of the walkers whose move is accepted, and
+leaves the others unchanged. Gradients flow through the state like through any tensor computation.</p>
+<p>With <code class="docutils literal notranslate"><span class="pre">compiled=True</span></code>, each step runs through <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code> (see
+<code class="xref py py-class docutils literal notranslate"><span class="pre">CompiledLowRankPfaffian</span></code>): a few seconds of compilation on the first steps,
+then less per-call overhead on small matrices.</p>
+<p>On CPU without a graph to build, accepted moves are applied to the inverse at once, in place, by the Rust
+kernels of <code class="xref py py-class docutils literal notranslate"><span class="pre">LowRankPfaffian</span></code> instead of being delayed, which is faster;
+<a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.delay" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.delay"><code class="xref py py-attr docutils literal notranslate"><span class="pre">delay</span></code></a> then stays 0. The results are the same up to round-off. The updater copies an inverse it did not
+compute (<a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.from_inverse" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.from_inverse"><code class="xref py py-meth docutils literal notranslate"><span class="pre">from_inverse()</span></code></a>) or that it returned (<a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.inverse" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.inverse"><code class="xref py py-attr docutils literal notranslate"><span class="pre">inverse</span></code></a>) before updating it, so tensors held by
+the caller are never changed.</p>
+<p>Round-off accumulates over many updates, mostly in single precision. <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.reset" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.reset"><code class="xref py py-meth docutils literal notranslate"><span class="pre">reset()</span></code></a> recomputes the
+inverse from the current matrix (which the caller keeps); the running <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.pfaffian" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.pfaffian"><code class="xref py py-attr docutils literal notranslate"><span class="pre">pfaffian</span></code></a> is the Pfaffian
+of the initial matrix times the accepted ratios, and can over- or underflow over long runs.</p>
+<p>The input matrix is a skew-symmetric matrix of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>, in float32, float64, complex64 or
+complex128.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.IMMEDIATE_MAX_NUMEL">
+<span class="sig-name descname"><span class="pre">IMMEDIATE_MAX_NUMEL</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4611686018427387904</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.IMMEDIATE_MAX_NUMEL" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_delay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compiled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.__init__" title="Permalink to this definition">¶</a></dt>
+<dd><p>Start from <code class="docutils literal notranslate"><span class="pre">matrix</span></code>, computing its inverse and its Pfaffian.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>matrix</strong> – Invertible skew-symmetric matrix of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>max_delay</strong> – Number of accepted updates after which they are merged into the inverse, at least 1.</p></li>
+<li><p><strong>compiled</strong> – When <code class="docutils literal notranslate"><span class="pre">True</span></code>, run the steps through <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">max_delay</span></code> is smaller than 1 or <code class="docutils literal notranslate"><span class="pre">matrix</span></code> is not square.</p></li>
+<li><p><strong>TypeError</strong> – If the dtype of <code class="docutils literal notranslate"><span class="pre">matrix</span></code> is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.accept">
+<span class="sig-name descname"><span class="pre">accept</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">update</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.accept" title="Permalink to this definition">¶</a></dt>
+<dd><p>Apply the update <code class="docutils literal notranslate"><span class="pre">A</span> <span class="pre">&lt;-</span> <span class="pre">A</span> <span class="pre">-</span> <span class="pre">u</span> <span class="pre">J</span> <span class="pre">u^T</span></code> to the batch elements selected by <code class="docutils literal notranslate"><span class="pre">mask</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>update</strong> – Update vectors <code class="docutils literal notranslate"><span class="pre">u</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">2k)</span></code>.</p></li>
+<li><p><strong>mask</strong> – Boolean tensor of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, <code class="docutils literal notranslate"><span class="pre">True</span></code> where the update is applied; every element
+when <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio of the applied update, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, equal to 1 where <code class="docutils literal notranslate"><span class="pre">mask</span></code> is <code class="docutils literal notranslate"><span class="pre">False</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.accept_replace">
+<span class="sig-name descname"><span class="pre">accept_replace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">change</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.accept_replace" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add <code class="docutils literal notranslate"><span class="pre">change</span></code> to row <code class="docutils literal notranslate"><span class="pre">index</span></code> and subtract it from column <code class="docutils literal notranslate"><span class="pre">index</span></code>, where <code class="docutils literal notranslate"><span class="pre">mask</span></code> is <code class="docutils literal notranslate"><span class="pre">True</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>index</strong> – Index of the row and column, an integer or an integer tensor of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p></li>
+<li><p><strong>change</strong> – Change of the row, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>mask</strong> – Boolean tensor of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, <code class="docutils literal notranslate"><span class="pre">True</span></code> where the change is applied; every element
+when <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio of the applied change, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>, equal to 1 where <code class="docutils literal notranslate"><span class="pre">mask</span></code> is <code class="docutils literal notranslate"><span class="pre">False</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.delay">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">delay</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.delay" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of accepted updates not yet merged into the stored inverse.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The number of delayed updates, between 0 and <code class="docutils literal notranslate"><span class="pre">max_delay</span> <span class="pre">-</span> <span class="pre">1</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.from_inverse">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_inverse</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pfaffian</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_delay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compiled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater"><span class="pre">PfaffianUpdater</span></a></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.from_inverse" title="Permalink to this definition">¶</a></dt>
+<dd><p>Start from an inverse that is already known, without inverting a matrix or computing its Pfaffian.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inverse</strong> – Inverse of the initial skew-symmetric matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+<li><p><strong>pfaffian</strong> – Pfaffian of the initial matrix, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>. When <code class="docutils literal notranslate"><span class="pre">None</span></code>, <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.pfaffian" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.pfaffian"><code class="xref py py-attr docutils literal notranslate"><span class="pre">pfaffian</span></code></a>
+starts at 1 and is the product of the accepted ratios, i.e. the Pfaffian relative to the start.</p></li>
+<li><p><strong>max_delay</strong> – Number of accepted updates after which they are merged into the inverse, at least 1.</p></li>
+<li><p><strong>compiled</strong> – When <code class="docutils literal notranslate"><span class="pre">True</span></code>, run the steps through <code class="docutils literal notranslate"><span class="pre">torch.compile</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The updater.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater">PfaffianUpdater</a></p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">max_delay</span></code> is smaller than 1 or <code class="docutils literal notranslate"><span class="pre">inverse</span></code> is not square.</p></li>
+<li><p><strong>TypeError</strong> – If the dtype of <code class="docutils literal notranslate"><span class="pre">inverse</span></code> is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.inverse">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">inverse</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.inverse" title="Permalink to this definition">¶</a></dt>
+<dd><p>Inverse of the current matrix, with the delayed updates applied (the state is not changed).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The inverse, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.max_delay">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">max_delay</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.max_delay" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of accepted updates after which they are merged into the stored inverse.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The maximum delay.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.merge">
+<span class="sig-name descname"><span class="pre">merge</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.merge" title="Permalink to this definition">¶</a></dt>
+<dd><p>Fold the delayed updates into the stored inverse, <code class="docutils literal notranslate"><span class="pre">A_0^{-1}</span> <span class="pre">&lt;-</span> <span class="pre">A_tau^{-1}</span></code>.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.pfaffian">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">pfaffian</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.pfaffian" title="Permalink to this definition">¶</a></dt>
+<dd><p>that of the matrix given to <a class="reference internal" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.reset" title="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.reset"><code class="xref py py-meth docutils literal notranslate"><span class="pre">reset()</span></code></a> times the accepted ratios.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The Pfaffian, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>torch.Tensor</p>
+</dd>
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Pfaffian of the current matrix</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.ratio">
+<span class="sig-name descname"><span class="pre">ratio</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">update</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.ratio" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio <code class="docutils literal notranslate"><span class="pre">Pf(A</span> <span class="pre">-</span> <span class="pre">u</span> <span class="pre">J</span> <span class="pre">u^T)</span> <span class="pre">/</span> <span class="pre">Pf(A)</span></code> for the current matrix <code class="docutils literal notranslate"><span class="pre">A</span></code>, without changing the state.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>update</strong> – Update vectors <code class="docutils literal notranslate"><span class="pre">u</span></code>, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">2k)</span></code>.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.ratio_replace">
+<span class="sig-name descname"><span class="pre">ratio_replace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">change</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.ratio_replace" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio for adding <code class="docutils literal notranslate"><span class="pre">change</span></code> to row <code class="docutils literal notranslate"><span class="pre">index</span></code> (and subtracting it from the column), without changing the
+state. See <code class="xref py py-meth docutils literal notranslate"><span class="pre">ratio_replace()</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>index</strong> – Index of the row and column, an integer or an integer tensor of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p></li>
+<li><p><strong>change</strong> – Change of the row, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The ratio, of shape <code class="docutils literal notranslate"><span class="pre">(...)</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.reset">
+<span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.pfaffian_updater.PfaffianUpdater.reset" title="Permalink to this definition">¶</a></dt>
+<dd><p>Restart from <code class="docutils literal notranslate"><span class="pre">matrix</span></code>: recompute its inverse and Pfaffian and drop the delayed updates.</p>
+<p>Useful to bound the round-off accumulated over many updates, with the current matrix kept by the caller.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>matrix</strong> – Invertible skew-symmetric matrix of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">matrix</span></code> is not square.</p></li>
+<li><p><strong>TypeError</strong> – If the dtype of <code class="docutils literal notranslate"><span class="pre">matrix</span></code> is not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-torch_pfaffian.low_rank.skew_gradient">
+<span id="torch-pfaffian-low-rank-skew-gradient-module"></span><h2>torch_pfaffian.low_rank.skew_gradient module<a class="headerlink" href="#module-torch_pfaffian.low_rank.skew_gradient" title="Permalink to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.skew_gradient.SkewGradient">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">torch_pfaffian.low_rank.skew_gradient.</span></span><span class="sig-name descname"><span class="pre">SkewGradient</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#torch_pfaffian.low_rank.skew_gradient.SkewGradient" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Function</span></code></p>
+<p>Identity whose backward pass projects the gradient onto skew-symmetric matrices, <code class="docutils literal notranslate"><span class="pre">(g</span> <span class="pre">-</span> <span class="pre">g^T)</span> <span class="pre">/</span> <span class="pre">2</span></code>.</p>
+<p>A function of a skew-symmetric matrix only depends on it through its skew-symmetric directions, but how an
+implementation reads the matrix (an upper triangle, a transposed product) decides where autograd puts the
+gradient of a raw leaf matrix. <a class="reference internal" href="torch_pfaffian.html#torch_pfaffian.pfaffian" title="torch_pfaffian.pfaffian"><code class="xref py py-func docutils literal notranslate"><span class="pre">pfaffian()</span></code></a> returns the skew-split convention
+<code class="docutils literal notranslate"><span class="pre">Pf(A)</span> <span class="pre">A^{-T}</span> <span class="pre">/</span> <span class="pre">2</span></code>; wrapping the skew-symmetric inputs of the low-rank updates in this identity gives them
+the same convention. The gradient of any parameter the matrix is built from (keeping it skew-symmetric) is
+unchanged, since only the skew-symmetric part of the gradient enters it.</p>
+<p>The forward pass returns a view of the input and costs nothing; the backward pass costs one pass over the
+<code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">x</span> <span class="pre">n</span></code> gradient. The input is a matrix of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>; complex matrices use the transpose, not
+the conjugate transpose.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.skew_gradient.SkewGradient.apply_if_needed">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">apply_if_needed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.skew_gradient.SkewGradient.apply_if_needed" title="Permalink to this definition">¶</a></dt>
+<dd><p>Wrap <code class="docutils literal notranslate"><span class="pre">matrix</span></code> in the identity only when a gradient will flow through it, so that inference pays nothing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>matrix</strong> – Skew-symmetric matrix of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">matrix</span></code>, wrapped when it requires a gradient and gradients are enabled.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.skew_gradient.SkewGradient.backward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">backward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">BackwardCFunction</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad_output</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.skew_gradient.SkewGradient.backward" title="Permalink to this definition">¶</a></dt>
+<dd><p>Skew-symmetric part of the incoming gradient.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ctx</strong> – Unused context.</p></li>
+<li><p><strong>grad_output</strong> – Gradient with respect to the output, of shape <code class="docutils literal notranslate"><span class="pre">(...,</span> <span class="pre">n,</span> <span class="pre">n)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(grad_output</span> <span class="pre">-</span> <span class="pre">grad_output^T)</span> <span class="pre">/</span> <span class="pre">2</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.skew_gradient.SkewGradient.forward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.skew_gradient.SkewGradient.forward" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="torch_pfaffian.low_rank.skew_gradient.SkewGradient.setup_context">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">setup_context</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">FunctionCtx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#torch_pfaffian.low_rank.skew_gradient.SkewGradient.setup_context" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-torch_pfaffian.low_rank">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-torch_pfaffian.low_rank" title="Permalink to this heading">¶</a></h2>
+</section>
+</section>
+
+
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>    
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'./',
+            VERSION:'',
+            LANGUAGE:'en',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+    <script type="text/javascript" src="static/documentation_options.js"></script>
+    <script type="text/javascript" src="static/doctools.js"></script>
+    <script type="text/javascript" src="static/sphinx_highlight.js"></script>
+    <script type="text/javascript" src="None"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script type="text/javascript" src="static/js/theme.js"></script>
+  
+    <div class="footer" role="contentinfo">
+        <div class="container">
+            &#169; Copyright 2024, Jérémie Gince.
+        Created using <a href="http://sphinx-doc.org/">Sphinx</a> 6.2.1.
+        </div>
+    </div>  
+
+</body>
+</html>

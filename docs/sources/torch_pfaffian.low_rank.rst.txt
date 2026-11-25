@@ -1,0 +1,53 @@
+torch\_pfaffian.low\_rank package
+=================================
+
+Submodules
+----------
+
+torch\_pfaffian.low\_rank.compiled\_low\_rank\_pfaffian module
+--------------------------------------------------------------
+
+.. automodule:: torch_pfaffian.low_rank.compiled_low_rank_pfaffian
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.low\_rank.low\_rank\_pfaffian module
+----------------------------------------------------
+
+.. automodule:: torch_pfaffian.low_rank.low_rank_pfaffian
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.low\_rank.pfaffian\_chain module
+------------------------------------------------
+
+.. automodule:: torch_pfaffian.low_rank.pfaffian_chain
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.low\_rank.pfaffian\_updater module
+--------------------------------------------------
+
+.. automodule:: torch_pfaffian.low_rank.pfaffian_updater
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+torch\_pfaffian.low\_rank.skew\_gradient module
+-----------------------------------------------
+
+.. automodule:: torch_pfaffian.low_rank.skew_gradient
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: torch_pfaffian.low_rank
+   :members:
+   :undoc-members:
+   :show-inheritance:
