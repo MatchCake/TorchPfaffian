@@ -65,7 +65,7 @@ class ParlettReidTriton:
             swaps of each matrix, of shape ``(batch,)``.
         :rtype: tuple[torch.Tensor, torch.Tensor]
         """
-        import triton  # type: ignore[import-not-found, unused-ignore]
+        import triton  # type: ignore[import-not-found, import-untyped, unused-ignore]
 
         dimension = matrix.shape[-1]
         working = matrix.reshape(-1, dimension, dimension).contiguous().clone()  # eliminated in place
@@ -97,8 +97,8 @@ class ParlettReidTriton:
     def _kernel() -> Any:  # pragma: no cover - needs a GPU
         # The jitted kernel, built on first use; None without Triton.
         try:
-            import triton  # type: ignore[import-not-found, unused-ignore]
-            import triton.language as tl  # type: ignore[import-not-found, unused-ignore]
+            import triton  # type: ignore[import-not-found, import-untyped, unused-ignore]
+            import triton.language as tl  # type: ignore[import-not-found, import-untyped, unused-ignore]
         except ImportError:
             return None
 
@@ -126,6 +126,9 @@ class ParlettReidTriton:
                         current += tau_t * next_at - next_t * tau_at
                     below = inside & (index > column)
                     pivot_row = tl.argmax(tl.where(below, tl.abs(current), -1.0), axis=0, tie_break_left=True)
+                    # A NaN in `current` can make argmax return a padding lane (pivot_row >= size), whose swap would
+                    # write into the next matrix of the batch; keep the pivot row inside this matrix.
+                    pivot_row = tl.where((pivot_row > column) & (pivot_row < size), pivot_row, column + 1)
                     swaps += (pivot_row != column + 1).to(tl.int32)
                     # Swap rows, then columns, column + 1 and pivot_row of A0 (both writes agree when equal), and
                     # those entries of the delayed update vectors.
@@ -166,7 +169,9 @@ class ParlettReidTriton:
                     tl.store(matrix + (column + 1) * size + column, pivot)
                     tl.store(matrix + column * size + column + 1, -pivot)
                     trailing = inside & (index >= column + 2)
-                    tl.store(taus + step * size + index, tl.where(trailing, current / pivot, 0.0), mask=inside)
+                    # An exact zero pivot (Pf = 0) gives a zero tau rather than 0 / 0, so the matrix stays finite.
+                    tau = tl.where(trailing & (pivot != 0), current / pivot, 0.0)
+                    tl.store(taus + step * size + index, tau, mask=inside)
                     tl.store(nexts + step * size + index, tl.where(trailing, following, 0.0), mask=inside)
                     tl.debug_barrier()
                 # The panel's delayed updates on the trailing block, in one pass: A += sum_t tau_t x_t^T - x_t tau_t^T.
