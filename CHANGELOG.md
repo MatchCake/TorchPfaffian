@@ -110,6 +110,11 @@ changes the package's behaviour, API, documentation or packaging.
 
 ### Fixed
 
+- `ParlettReidTriton` (CUDA, `float32` and `float64`): a matrix with a zero pivot (`Pf = 0`) in a batch whose
+  size `m` is not a power of two made the pivot search return a padding row, whose swap wrote into the next
+  matrix of the batch (or past the end of the buffer for the last one), so `pfaffian()` and `slog_pfaffian()`
+  returned `0` for that neighbour. A zero pivot now gives a zero update instead of `0 / 0`, and the pivot row
+  is kept inside its own matrix even for NaN or inf inputs (#52).
 - `pfaffian()` gave a wrong gradient to every element of a complex batch in which one element overflowed in
   the linear domain: the recovery recomputed the whole batch as `phase * exp(log|Pf|)`, whose gradient
   dropped the phase's derivative. It now recovers only the non-finite elements, with the full derivative

@@ -80,3 +80,50 @@ class TestParlettReidTriton:
         torch.testing.assert_close(phase, expected_phase)
         torch.testing.assert_close(log_abs, expected_log, atol=atol, rtol=rtol)
         assert phase[1] == 0 and log_abs[1] == -torch.inf
+
+    @CUDA
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    @pytest.mark.parametrize("size", [6, 40, 64, 130])  # padded (6, 40, 130) and unpadded (64) rows
+    @pytest.mark.parametrize("zero_index", [0, 2, 3])  # first, middle and last element of the batch
+    def test_zero_matrix_does_not_change_its_neighbours(
+        self, dtype, size, zero_index, monkeypatch
+    ):  # pragma: no cover - needs a GPU
+        # Regression for #52: the NaN taus of a zero matrix made the pivot search pick a padding row, whose swap
+        # wrote into the next matrix of the batch.
+        pytest.importorskip("triton")
+        matrix = self._skew(4, size, size, dtype=dtype).cuda()
+        matrix[zero_index] = 0
+        working, _ = ParlettReidTriton.eliminate(matrix)
+        assert torch.isfinite(working[zero_index]).all()
+        for index in range(4):
+            if index != zero_index:
+                alone, _ = ParlettReidTriton.eliminate(matrix[index : index + 1])
+                torch.testing.assert_close(working[index], alone[0], atol=0, rtol=0)
+        phase, log_abs = parlett_reid_slog(matrix)
+        monkeypatch.setattr(ParlettReidTriton, "supports", staticmethod(lambda tensor: False))
+        expected_phase, expected_log = parlett_reid_slog(matrix)
+        if dtype == torch.float32:
+            atol, rtol = ATOL_SINGLE_PRECISION_COMPARISON, RTOL_SINGLE_PRECISION_COMPARISON
+        else:
+            atol, rtol = ATOL_SCALAR_COMPARISON, RTOL_SCALAR_COMPARISON
+        torch.testing.assert_close(phase, expected_phase)
+        torch.testing.assert_close(log_abs, expected_log, atol=atol, rtol=rtol)
+        assert phase[zero_index] == 0 and log_abs[zero_index] == -torch.inf
+
+    @CUDA
+    @pytest.mark.parametrize("poison", ["matrix", "first_pair"])
+    @pytest.mark.parametrize("size", [6, 34, 40, 66, 130])  # all padded, so argmax can reach a padding lane
+    def test_nan_matrix_does_not_change_its_neighbours(self, poison, size):  # pragma: no cover - needs a GPU
+        # NaN in the pivot search can make argmax return a row outside the matrix (a padding lane at or past
+        # `size`); the clamp keeps the swap inside the matrix, so every other element is left untouched.
+        pytest.importorskip("triton")
+        matrix = self._skew(4, size, size).cuda()
+        if poison == "matrix":
+            matrix[1] = torch.nan
+        else:
+            matrix[1, 0, 1], matrix[1, 1, 0] = torch.nan, torch.nan
+        working, _ = ParlettReidTriton.eliminate(matrix)
+        torch.cuda.synchronize()
+        for index in (0, 2, 3):
+            alone, _ = ParlettReidTriton.eliminate(matrix[index : index + 1])
+            torch.testing.assert_close(working[index], alone[0], atol=0, rtol=0)
